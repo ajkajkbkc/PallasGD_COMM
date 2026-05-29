@@ -3546,7 +3546,7 @@ static void kalyke_alarm_post(mqtt_config_array_hanyu_st *pCfgs, char eventRecov
             }
 
             nowVal = getElementValue_Str(pRC, i, valStr);
-            if(isTrigEvent(pRC[i].sym, &nowVal, &pRC[i].alarmVal))
+            if(isTrigEvent((symbol_e)pRC[i].sym, &nowVal, &pRC[i].alarmVal))
             {
                 sprintf(tempStr, "{\"%s\":%s,\"cont\":\"%s\"},", pRC[i].name, valStr, pRC[i].alarmContent);  //显示触发content
                 pRC[i].alarmType = true;
@@ -3600,7 +3600,7 @@ static void kalyke_alarm_post(mqtt_config_array_hanyu_st *pCfgs, char eventRecov
                 sprintf(tempStr, "\"%s\":0,", "ERRCODE");
             }
             nowVal = getElementValue_Str(pRC, i, valStr);
-            if(isTrigEvent(pRC[i].sym, &nowVal, &pRC[i].alarmVal))
+            if(isTrigEvent((symbol_e)pRC[i].sym, &nowVal, &pRC[i].alarmVal))
             {                
                 sprintf(tempStr, "\"%s\":1,", "ERRCODE");
                 strcat(mqttBuf, tempStr);
@@ -3656,7 +3656,7 @@ void kalyke_alarm_monitor_task(void *p_arg)
 
                 if(pRC[j].alarmType == false)
                 {
-                    if(isTrigEvent(pRC[j].sym, &nowVal, &pRC[j].alarmVal))//数据点未触发事件时触发
+                    if(isTrigEvent((symbol_e)pRC[j].sym, &nowVal, &pRC[j].alarmVal))//数据点未触发事件时触发
                     {
                         eventRecover = 0;
                         kalyke_alarm_post(&g_plc_netcfg.mqtt.pConfigsHANYU[i], eventRecover);//事件触发后上传                        
@@ -3665,7 +3665,7 @@ void kalyke_alarm_monitor_task(void *p_arg)
                 }
                 else
                 {
-                    if(!isTrigEvent(pRC[j].sym, &nowVal, &pRC[j].alarmVal))//数据点触发事件时恢复
+                    if(!isTrigEvent((symbol_e)pRC[j].sym, &nowVal, &pRC[j].alarmVal))//数据点触发事件时恢复
                     {
                         eventRecover = 1;//事件恢复后上传
                         continue;

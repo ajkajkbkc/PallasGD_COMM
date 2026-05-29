@@ -2358,6 +2358,7 @@ void mb_slave_ctrl_programme_cmd(md_slave_msg_pack *pMsg)
                 if((NULL != gtv_ModbusFileTrans[i]) && (gtv_ModbusFileTrans[i]->mcv_Flag & 0x02))
                 {
                     llv_FileLen = plc_get_file_length(gtv_ModbusFileTrans[i]->mcp_FileHandler + 6, 4);
+										(void)llv_FileLen;
                     LOGD(TAG, "file length = %d", llv_FileLen);
 
                     /*写文件到目标分区*/

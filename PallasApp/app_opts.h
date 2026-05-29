@@ -111,7 +111,7 @@
     */
 /* ---------------------- Ñ¡Ôñ²úÆ· --------------------------- */
 /*configTOTAL_HEAP_SIZE  PARAM_SFA: 46500   PARAM_SFB: 42600   PARAM_SFE: 41500 */
-#define PARAM_TYPE                    (PARAM_SFE1)
+#define PARAM_TYPE                    (PARAM_SFA1)
 #define PROTOCOL_TYPE                 (PROTOCOL_MB | PROTOCOL_MBTCP | PROTOCOL_FLKMQTT)  //(PROTOCOL_MB | PROTOCOL_MBTCP | PROTOCOL_FLKMQTT | XX |...)
 /* ----------------------------------------------------------- */
 

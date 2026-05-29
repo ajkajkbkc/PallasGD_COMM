@@ -468,8 +468,8 @@ static int8_t kalyke_modbus_com_task_do(unsigned short lsv_PortNum)
             RST_UART_SM_FLAG(lsv_PortNum, UART_SM_MODBUS_ERROR);
             ltp_ModlinkItem->isExec = 0;
             kalyke_modbus_next_index(lsv_PortNum, ltp_ModlinkHead);
-            LOGW(TAG, "Leave %s()...018, Time out", __func__);
-            return pdPASS;
+//            LOGW(TAG, "Leave %s()...018, Time out", __func__);
+//            return pdPASS;
         }
     }
     LOGD(TAG, "Leave %s()...019", __func__);
