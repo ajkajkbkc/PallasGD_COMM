@@ -66,7 +66,7 @@ static const mb_element_map_table_info stv_ModbusMapTable[] =
     {MB_WORD_ELEMENT,   MB_WORD_SYNC_SAMPLED,    MB_BROADCAST,    0x2000,     0x23FD,   0,            7 * 146 },  //1022 * 16bit
 #endif
 #if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFA
-    {MB_WORD_ELEMENT,   MB_HALF_WORD_TOU,        MB_BROADCAST,    0x3000,     0x307F,   0,            128     },  /* TOU分时计费配置与电能 128个half-word */
+    {MB_WORD_ELEMENT,   MB_HALF_WORD_TOU,        MB_BROADCAST,    0x3000,     0x31F3,   0,            500     },  /* TOU分时计费配置与电能 128个half-word */
 #endif    
     
     {MB_ELEMENT_MAX,    0,                       0,               0,          0,        0,            0       }
