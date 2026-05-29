@@ -27,6 +27,7 @@
 #include "kalyke_4G_task.h"
 #include "app_led.h"
 #include "module_ESE.h"
+#include "app_tou.h"
 /* Private define ------------------------------------------------------------*/
 
 
@@ -480,7 +481,7 @@ void mb_slave_read_holding_register(md_slave_msg_pack *pMsg)
         memcpy(lsv_buf + lsv_temp, &gMeterParam, sizeof(gMeterParam));  //后面移gMeterParam数据
         lsv_temp += sizeof(gMeterParam) / 2;
         memcpy(lsv_buf + lsv_temp, &gMeterEnergy, sizeof(gMeterEnergy));  //后面移gMeterEnergy数据
-        lsv_temp = sizeof(gESE_Elem) / 2;
+        lsv_temp = sizeof(gMeterEnergy) / 2;
 
         for(i = 0; i < lsv_ElementCnt; i++)
         {
@@ -809,7 +810,33 @@ void mb_slave_read_holding_register(md_slave_msg_pack *pMsg)
         pMsg->mcp_RespBuff[4] = (gMeterRunInfo.EmuWork & 0x00FF);
         break;
 #endif
+/* 分时计费(TOU)配置与电能数据读取 ----------------------------------------- */
+    case MB_HALF_WORD_TOU:
+    {
+        /* TOU数据按half-word(16-bit)映射：前sizeof(gTouConfig)/2个为配置，后续为电能 */
+        uint16_t *touBuf = (uint16_t *)&gTouConfig;
+        uint16_t configHalfWords = sizeof(gTouConfig) / 2;
 
+        for (i = 0; i < lsv_ElementCnt; i++)
+        {
+            uint16_t offset = lsv_ElementAddr + i;
+            if (offset < configHalfWords)
+            {
+                lsv_ElementValue = touBuf[offset];
+            }
+            else if (offset < configHalfWords + sizeof(gTouEnergy) / 2)
+            {
+                lsv_ElementValue = ((uint16_t *)&gTouEnergy)[offset - configHalfWords];
+            }
+            else
+            {
+                lsv_ElementValue = 0;
+            }
+            word_to_bytePoint(lsv_ElementValue, &pMsg->mcp_RespBuff[3 + i * 2]);
+            lsv_DataLen += 2;
+        }
+    }
+    break;
 #if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB
     case MB_WORD_SYNC_SAMPLED:
         for(i = 0; i < lsv_ElementCnt; i++)
@@ -837,241 +864,6 @@ void mb_slave_read_holding_register(md_slave_msg_pack *pMsg)
 
     mb_slave_verify_resp_msg(pMsg);
 }
-
-///**
-//  * @brief  读寄存器，支持D SD Z T C R
-//  * @param  None
-//  * @retval None
-//  */
-//void mb_slave_read_holding_register(md_slave_msg_pack *pMsg)
-//{
-//    LOGE("mb", "Enter %s\r\n", __func__);
-//    unsigned char lcv_Ret;
-//    unsigned short lsv_ModbusAddr;
-//    unsigned short lsv_ElementAddr;
-//    unsigned char lcv_ElementType;
-//    unsigned short lsv_ElementCnt;
-//    unsigned char i;
-//    unsigned short lsv_ElementValue;
-//    unsigned long llv_C32Value;
-//    unsigned short lsv_DataLen;
-
-//    /*不支持广播消息*/
-//    if(pMsg->mcv_IsBroadcastInfo) {
-//        return;
-//    }
-
-////    if(pMsg->msv_ReceiveLen != 8) {
-////        pMsg->mcv_ErrorCode = MB_ILIEGAL_DATA;
-////        mb_slave_error_resp(pMsg);
-////        LOGE("mb", "Enter1111111111111");
-////        return;
-////    }
-//        
-//    lsv_ModbusAddr = GET_BIGPU16_DATA(&pMsg->mcp_ReceiveBuff[2]);
-//    lsv_ElementCnt = GET_BIGPU16_DATA(&pMsg->mcp_ReceiveBuff[4]);
-//    
-//    if(lsv_ElementCnt > MB_MAX_R_WORD_NUM) {
-//        pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//        mb_slave_error_resp(pMsg);
-//        LOGE("mb", "Enter2222222222222");
-//        return;
-//    }
-
-//    lcv_Ret = mb_slave_convert_element_info(MB_WORD_ELEMENT, lsv_ModbusAddr, &lcv_ElementType, &lsv_ElementAddr);
-//    LOGE("MB_WORD_ELEMENT", "MB_WORD_ELEMENT = %d", MB_WORD_ELEMENT);
-//    LOGE("lsv_ModbusAddr", "lsv_ModbusAddr = %d", lsv_ModbusAddr);
-//    LOGE("lcv_ElementType", "lcv_ElementType = %d", lcv_ElementType);
-
-//    if(lcv_Ret != pdPASS) {
-//        pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//        mb_slave_error_resp(pMsg);
-//        LOGE("mb", "Enter3333333333333");
-//        return;
-//    }
-
-//    lsv_DataLen = 0;
-
-//    LOGE("lcv_ElementType", "lcv_ElementType = %d", lcv_ElementType);
-//    
-//    switch(lcv_ElementType) {
-//        case MB_WORD_D:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > D_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                lsv_ElementValue = GET_D_ELEMENT_VALUE(lsv_ElementAddr+i);
-//                pMsg->mcp_RespBuff[3+i*2] = (unsigned char)(lsv_ElementValue >> 8);
-//                pMsg->mcp_RespBuff[3+i*2+1] = (unsigned char)(lsv_ElementValue);
-//                lsv_DataLen += 2;
-//            }
-//            break;
-
-//        case MB_WORD_SD:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > SD_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                lsv_ElementValue = GET_SD_ELEMENT_VALUE(lsv_ElementAddr+i);
-//                pMsg->mcp_RespBuff[3+i*2] = (unsigned char)(lsv_ElementValue >> 8);
-//                pMsg->mcp_RespBuff[3+i*2+1] = (unsigned char)(lsv_ElementValue);
-//                lsv_DataLen += 2;
-//            }
-//            break;
-
-//        case MB_WORD_Z:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > Z_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                lsv_ElementValue = GET_Z_ELEMENT_VALUE(lsv_ElementAddr+i);
-//                pMsg->mcp_RespBuff[3+i*2] = (unsigned char)(lsv_ElementValue >> 8);
-//                pMsg->mcp_RespBuff[3+i*2+1] = (unsigned char)(lsv_ElementValue);
-//                lsv_DataLen += 2;
-//            }
-//            break;
-
-//        case MB_WORD_C:
-//            if(lsv_ElementAddr < C16_RANG) {
-//                /*16bit 计数器*/
-//                if(lsv_ElementAddr + lsv_ElementCnt -1 > C16_RANG) {
-//                    pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                    mb_slave_error_resp(pMsg);
-//                    return;
-//                }
-
-//                for(i=0; i<lsv_ElementCnt; i++) {
-//                    lsv_ElementValue = GET_C16_CURRENT_VALUE(lsv_ElementAddr+i);
-//                    pMsg->mcp_RespBuff[3+i*2] = (unsigned char)(lsv_ElementValue >> 8);
-//                    pMsg->mcp_RespBuff[3+i*2+1] = (unsigned char)(lsv_ElementValue);
-//                    lsv_DataLen += 2;
-//                }
-//            } else {
-//                /*32Bit 计数器*/
-//                if(lsv_ElementAddr + lsv_ElementCnt -1 > gtp_PlcElementInfo->msv_CElement.msv_ElementCnt) {
-//                    pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                    mb_slave_error_resp(pMsg);
-//                    return;
-//                }
-
-//                for(i=0; i<lsv_ElementCnt; i++) {
-//                    llv_C32Value = GET_C32_CURRENT_VALUE(lsv_ElementAddr+i);
-//                    pMsg->mcp_RespBuff[3+i*4] = (unsigned char)(llv_C32Value >> 24);
-//                    pMsg->mcp_RespBuff[3+i*4+1] = (unsigned char)(llv_C32Value >> 16);
-//                    pMsg->mcp_RespBuff[3+i*4+2] = (unsigned char)(llv_C32Value >> 8);
-//                    pMsg->mcp_RespBuff[3+i*4+3] = (unsigned char)(llv_C32Value);
-//                    lsv_DataLen += 4;
-//                }
-
-//            }
-//            break;
-
-//        case MB_WORD_T:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > T_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                lsv_ElementValue = GET_T_CURRENT_VALUE(lsv_ElementAddr+i);
-//                pMsg->mcp_RespBuff[3+i*2] = (unsigned char)(lsv_ElementValue >> 8);
-//                pMsg->mcp_RespBuff[3+i*2+1] = (unsigned char)(lsv_ElementValue);
-//                lsv_DataLen += 2;
-//            }
-//            break;
-
-//        case MB_WORD_R:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > R_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                lsv_ElementValue = GET_R_ELEMENT_VALUE(lsv_ElementAddr+i);
-//                pMsg->mcp_RespBuff[3+i*2] = (unsigned char)(lsv_ElementValue >> 8);
-//                pMsg->mcp_RespBuff[3+i*2+1] = (unsigned char)(lsv_ElementValue);
-//                lsv_DataLen += 2;
-//            }
-//            break;
-
-//    }
-
-//    /*组响应帧*/
-//    for(i=0; i<2; i++)
-//        pMsg->mcp_RespBuff[i] = pMsg->mcp_ReceiveBuff[i];
-
-//    pMsg->mcp_RespBuff[2] = lsv_DataLen;
-
-//    pMsg->msv_RespLen = lsv_DataLen + 3;
-//    mb_slave_verify_resp_msg(pMsg);
-
-//}
-
-///**
-//  * @brief  写单寄存器 D SD Z T C R
-//  * @param  None
-//  * @retval None
-//  */
-//void mb_slave_write_register(md_slave_msg_pack *pMsg)
-//{
-//    unsigned char lcv_Ret;
-//    unsigned short lsv_ModbusAddr, lsv_ElementAddr, lsv_ElementValue;
-//    unsigned char lcv_ElementType;
-//    unsigned char i;
-
-//    lsv_ModbusAddr = GET_BIGPU16_DATA(&pMsg->mcp_ReceiveBuff[2]);
-//    lsv_ElementValue = GET_BIGPU16_DATA(&pMsg->mcp_ReceiveBuff[4]);
-
-//    lcv_Ret = mb_slave_convert_element_info(MB_WORD_ELEMENT, lsv_ModbusAddr, &lcv_ElementType, &lsv_ElementAddr);
-//    if(lcv_Ret != pdPASS) {
-//        pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//        mb_slave_error_resp(pMsg);
-//        return;
-//    }
-
-//    switch(lcv_ElementType) {
-//        case MB_WORD_D:
-//            SET_D_ELEMENT_VALUE(lsv_ElementAddr, lsv_ElementValue);
-//            break;
-//        case MB_WORD_SD:
-//            /*20170811: 需要增加写入权限校验...*/
-//            SET_SD_ELEMENT_VALUE(lsv_ElementAddr, lsv_ElementValue);
-//            break;
-//        case MB_WORD_Z:
-//            SET_Z_ELEMENT_VALUE(lsv_ElementAddr, lsv_ElementValue);
-//            break;
-//        case MB_WORD_T:
-//            SET_T_CURRENT_VALUE(lsv_ElementAddr, lsv_ElementValue);
-//            break;
-//        case MB_WORD_R:
-//            SET_R_ELEMENT_VALUE(lsv_ElementAddr, lsv_ElementValue);
-//            break;
-//        case MB_WORD_C:
-//            if(lsv_ElementAddr < C16_RANG)
-//                SET_C16_CURRENT_VALUE(lsv_ElementAddr, lsv_ElementValue);
-//            else
-//                SET_C32_CURRENT_VALUE(lsv_ElementAddr, lsv_ElementValue);
-//            break;
-//    }
-
-//    /*组响应帧,返回帧为请求帧的复制*/
-//    for(i=0; i<6; i++)
-//        pMsg->mcp_RespBuff[i] = pMsg->mcp_ReceiveBuff[i];
-
-//    pMsg->msv_RespLen = 6;
-//    mb_slave_verify_resp_msg(pMsg);
-//}
 
 /**
   * @brief  写单寄存器
@@ -1380,6 +1172,16 @@ void mb_slave_write_register(md_slave_msg_pack *pMsg)
         //MB_HALF_WORD_LTLIST can not use 0x06 function code. Only read
         break;
 
+        /* 分时计费(TOU)配置写入：仅0x3000地址支持写配置使能(0=关闭,非0=开启)----- */
+    case MB_HALF_WORD_TOU:
+        if (lsv_ModbusAddr == 0x3000 && lsv_ElementAddr == 0)
+        {
+            gTouConfig.enable = (lsv_ElementValue != 0) ? 1 : 0;
+            TOU_SaveConfig();
+            LOGI("mb", "TOU enable set to %d via Modbus", gTouConfig.enable);
+        }
+        break;
+
 #if  PROD_TYPE == PROD_FSS
     case MB_WORD_CALICMD:
         if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_DEA4)  //三相全电流
@@ -1651,11 +1453,6 @@ void mb_slave_write_multiple_registers(md_slave_msg_pack *pMsg)
         gParam.st.AlmOutput1 = bytePoint_to_word((uint8_t *)&lsp_Value[1]) == 0 ? BOOL_Normal : BOOL_Alarm;
         SET_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制   
     }
-//    else if(lsv_ModbusAddr == 0x0107)
-//    {
-//        gParam.st.AlmOutput1 = bytePoint_to_word((uint8_t *)&lsp_Value[1]) == 0 ? BOOL_Normal : BOOL_Alarm;
-//        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制            
-//    }
     Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
 #endif
         break;
@@ -1709,36 +1506,6 @@ void mb_slave_write_multiple_registers(md_slave_msg_pack *pMsg)
             }
             SET_FLASH_WORD_PARAM_VALUE(lsv_ElementAddr + i, llv_C32Value);
         }
-//        if( lsv_ModbusAddr == 0x042B && llv_C32Value == (PROD_FL | PARAM_M1AI) )  //配置产品参数为雷电流
-//        {
-//            gFlashParam.st.Adc_K01_K02 = 300;
-
-//            gFlashParam.st.PAdc01_K = 280;     //280  => 0.0280
-//            gFlashParam.st.PAdc01_B = -278;    //-278 => -2.78
-//            gFlashParam.st.NAdc01_K = 280;
-//            gFlashParam.st.NAdc01_B = -278;
-//            gFlashParam.st.PAdc02_K = 311;     //311  => 0.0311
-//            gFlashParam.st.PAdc02_B = -370;    //-370 => -3.70
-//            gFlashParam.st.NAdc02_K = 311;
-//            gFlashParam.st.NAdc02_B = -370;
-//        }
-//        else if( lsv_ModbusAddr == 0x042B && llv_C32Value == (PROD_FL | PARAM_L2AI))  //配置产品参数为瞬态电流
-//        {
-//            gFlashParam.st.Adc_K01_K02 = 2000;
-
-//            gFlashParam.st.PAdc01_K = 4900;    //4900  => 0.4900
-//            gFlashParam.st.PAdc01_B = -5455;   //-5455 => -54.55
-//            gFlashParam.st.NAdc01_K = 4900;
-//            gFlashParam.st.NAdc01_B = -5455;
-//            gFlashParam.st.PAdc02_K = 5580;    //5580  => 0.5580
-//            gFlashParam.st.PAdc02_B = -18773;  //-18773 => -187.73
-//            gFlashParam.st.NAdc02_K = 5580;
-//            gFlashParam.st.NAdc02_B = -18773;
-//        }
-//        else if( lsv_ModbusAddr == 0x042B && ((llv_C32Value & PROD_XX) == PROD_FSS))  //配置产品参数为智能SPD
-//        {
-//            gFlashParam.st.magicNum = 0;  //恢复出厂设置
-//        }
         Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
         break;
 
@@ -1814,7 +1581,27 @@ void mb_slave_write_multiple_registers(md_slave_msg_pack *pMsg)
     case MB_HALF_WORD_LTLIST:
         //MB_HALF_WORD_LTLIST can not use 0x10 function code
         break;
+/* 分时计费(TOU)完整配置批量写入 ------------------------------------------- */
+    case MB_HALF_WORD_TOU:
+    {
+        uint16_t *touBuf = (uint16_t *)&gTouConfig;
+        uint16_t configHalfWords = sizeof(gTouConfig) / 2;
 
+        for (i = 0; i < lsv_ElementCnt; i++)
+        {
+            uint16_t offset = lsv_ElementAddr + i;
+            uint16_t val = GET_BIGPU16_DATA((uint8_t *)&lsp_Value[i]);
+
+            if (offset < configHalfWords)
+            {
+                touBuf[offset] = val;
+            }
+            /* 电能区域不允许通过Modbus写入(只读) */
+        }
+        TOU_SaveConfig();
+        LOGI("mb", "TOU config written via Modbus 0x10, %d half-words", lsv_ElementCnt);
+    }
+    break;
 #if  PROD_TYPE == PROD_FSS
     case MB_WORD_CALICMD:
         if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_DEA4)  //三相全电流
@@ -1853,145 +1640,6 @@ void mb_slave_write_multiple_registers(md_slave_msg_pack *pMsg)
     pMsg->msv_RespLen = 6;
     mb_slave_verify_resp_msg(pMsg);
 }
-
-///**
-//  * @brief  写多寄存器
-//  * @param  None
-//  * @retval None
-//  */
-//void mb_slave_write_multiple_registers(md_slave_msg_pack *pMsg)
-//{
-//    unsigned char lcv_Ret;
-//    unsigned short lsv_ModbusAddr, lsv_ElementCnt, lsv_ElementAddr;
-//    unsigned char lcv_ElementType, lcv_ValueByteNum;
-//    unsigned short i;
-//    unsigned short *lsp_Value;
-//    unsigned long llv_C32Value;
-
-//    lsv_ModbusAddr = GET_BIGPU16_DATA(&pMsg->mcp_ReceiveBuff[2]);
-//    lsv_ElementCnt = GET_BIGPU16_DATA(&pMsg->mcp_ReceiveBuff[4]);
-//    lcv_ValueByteNum = pMsg->mcp_ReceiveBuff[6];
-
-//    LOGD("mb", "Enter %s(), lsv_ModbusAddr = %u, lsv_ElementCnt = %u, lcv_ValueByteNum = %u", __func__, lsv_ModbusAddr, lsv_ElementCnt, lcv_ValueByteNum);
-//    if((lsv_ElementCnt > MB_MAX_W_WORD_NUM) || (lsv_ElementCnt < 1)) {
-//        pMsg->mcv_ErrorCode = MB_ILIEGAL_DATA;
-//        mb_slave_error_resp(pMsg);
-//        return;
-//    }
-
-//    if(lsv_ElementCnt != lcv_ValueByteNum>>1) {
-//        pMsg->mcv_ErrorCode = MB_ILIEGAL_DATA;
-//        mb_slave_error_resp(pMsg);
-//        return;
-//    }
-
-//    lcv_Ret = mb_slave_convert_element_info(MB_WORD_ELEMENT, lsv_ModbusAddr, &lcv_ElementType, &lsv_ElementAddr);
-//    if(lcv_Ret != pdPASS) {
-//        pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//        mb_slave_error_resp(pMsg);
-//        return;
-//    }
-
-//    lsp_Value = (unsigned short *)&pMsg->mcp_ReceiveBuff[7];
-//    LOGD("mb", "lcv_ElementType = %u, lsv_ElementAddr = %u", lcv_ElementType, lsv_ElementAddr);
-//    switch(lcv_ElementType) {
-//        case MB_WORD_D:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > D_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                SET_D_ELEMENT_VALUE(lsv_ElementAddr+i, GET_BIGPU16_DATA((uint8_t*)&lsp_Value[i]));
-//            }
-//            break;
-
-//        case MB_WORD_SD:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > SD_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                /*20170811:需要增加SD元件写入权限校验...*/
-//                SET_SD_ELEMENT_VALUE(lsv_ElementAddr+i, GET_BIGPU16_DATA((uint8_t*)&lsp_Value[i]));
-//            }
-//            break;
-
-//        case MB_WORD_Z:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > Z_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                SET_Z_ELEMENT_VALUE(lsv_ElementAddr+i, GET_BIGPU16_DATA((uint8_t*)&lsp_Value[i]));
-//            }
-//            break;
-
-//        case MB_WORD_T:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > T_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                SET_T_CURRENT_VALUE(lsv_ElementAddr+i, GET_BIGPU16_DATA((uint8_t*)&lsp_Value[i]));
-//            }
-//            break;
-
-//        case MB_WORD_C:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > C_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            if((lsv_ElementAddr) < C16_RANG) {
-
-//                for(i=0; i<lsv_ElementCnt; i++) {
-//                    SET_C16_CURRENT_VALUE(lsv_ElementAddr+i, GET_BIGPU16_DATA((uint8_t*)&lsp_Value[i]));
-//                }
-//            } else {
-//                lsv_ElementCnt <<= 1;
-
-//                for(i=0; i<lsv_ElementCnt; i+=2) {
-//                    //llv_C32Value = (unsigned long)(lsp_Value[i]<<16) + lsp_Value[i+1];
-//                    llv_C32Value = GET_BIGPU32_DATA((uint8_t*)&lsp_Value[i]);
-//                    SET_C32_CURRENT_VALUE(lsv_ElementAddr+i/2, llv_C32Value);
-//                }
-//            }
-//            break;
-
-//        case MB_WORD_R:
-//            if(lsv_ElementAddr + lsv_ElementCnt -1 > R_RANG) {
-//                pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//                mb_slave_error_resp(pMsg);
-//                return;
-//            }
-
-//            for(i=0; i<lsv_ElementCnt; i++) {
-//                SET_R_ELEMENT_VALUE(lsv_ElementAddr+i, GET_BIGPU16_DATA((uint8_t*)&lsp_Value[i]));
-//            }
-//            break;
-
-//        default:
-//            pMsg->mcv_ErrorCode = MB_ILIEGAL_ADDR;
-//            mb_slave_error_resp(pMsg);
-//            return;
-//    }
-
-//    /*组响应帧*/
-//    for(i=0; i<6; i++)
-//        pMsg->mcp_RespBuff[i] = pMsg->mcp_ReceiveBuff[i];
-
-//    pMsg->msv_RespLen = 6;
-//    mb_slave_verify_resp_msg(pMsg);
-//}
 
 /**
   * @brief  检测CRC校验是否正确
@@ -2098,116 +1746,6 @@ void mb_slave_ctrl_read_plc_info(md_slave_msg_pack *pMsg)
     for(i=0; i<12; i++) {
         pMsg->mcp_RespBuff[5+i] = gtv_DeviceConfigTable.mtv_DevInfo.mcv_DeviceId[i];
     }
-
-//    LOGV("mb_ctrl", "Version:%u, Rongliang:%u\r\n", GET_SD_ELEMENT_VALUE(1), GET_SD_ELEMENT_VALUE(2));
-//    /*版本号*/
-//    uint16_t ver = FIRMWARE_IMAGE_ID;
-//    pMsg->mcp_RespBuff[17] = (unsigned char)(ver >> 0x08);
-//    pMsg->mcp_RespBuff[18] = (unsigned char)(ver & 0xFF);
-
-//    /*程序容量*/
-//    ver = PROGRAM_CAPACITY;
-//    pMsg->mcp_RespBuff[19] = (unsigned char)(ver >> 0x08);
-//    pMsg->mcp_RespBuff[20] = (unsigned char)(ver & 0xFF);
-//    /*系统错误*/
-//    pMsg->mcp_RespBuff[21] = (unsigned char)(GET_SD_ELEMENT_VALUE(3)>>0x08);
-//    pMsg->mcp_RespBuff[22] = (unsigned char)(GET_SD_ELEMENT_VALUE(3)&0xFF);
-//    /*运行错误*/
-//    pMsg->mcp_RespBuff[23] = (unsigned char)(GET_SD_ELEMENT_VALUE(20)>>0x08);
-//    pMsg->mcp_RespBuff[24] = (unsigned char)(GET_SD_ELEMENT_VALUE(20)&0xFF);
-//    /*电池电压值*/
-//    pMsg->mcp_RespBuff[25] = 0;
-//    pMsg->mcp_RespBuff[26] = 33;
-//    /*PLC运行状态*/
-//    pMsg->mcp_RespBuff[27] = 0;
-//    pMsg->mcp_RespBuff[28] = plc_get_bit_element_value(SM_ELEMENT, 0);
-//    /*当前扫描速率*/
-//    pMsg->mcp_RespBuff[29] = (unsigned char)(GET_SD_ELEMENT_VALUE(30)>>0x08);
-//    pMsg->mcp_RespBuff[30] = (unsigned char)(GET_SD_ELEMENT_VALUE(30)&0xFF);
-//    /*最小扫描速率*/
-//    pMsg->mcp_RespBuff[31] = (unsigned char)(GET_SD_ELEMENT_VALUE(31)>>0x08);
-//    pMsg->mcp_RespBuff[32] = (unsigned char)(GET_SD_ELEMENT_VALUE(31)&0xFF);
-//    /*最大扫描速率*/
-//    pMsg->mcp_RespBuff[33] = (unsigned char)(GET_SD_ELEMENT_VALUE(32)>>0x08);
-//    pMsg->mcp_RespBuff[34] = (unsigned char)(GET_SD_ELEMENT_VALUE(32)&0xFF);
-
-//    /*IP地址*/
-//    memcpy(&(pMsg->mcp_RespBuff[35]),(unsigned char *)&(g_plc_netcfg.wan.ip.addr),4);
-//    /*子网掩码*/
-//    memcpy (&(pMsg->mcp_RespBuff[39]),(unsigned char *)&(g_plc_netcfg.wan.mask.addr),4);
-//    /*网关*/
-//    memcpy (&(pMsg->mcp_RespBuff[43]),(unsigned char *)&(g_plc_netcfg.wan.gate.addr),4);
-//    /*DNS*/
-//    memcpy (&(pMsg->mcp_RespBuff[47]) , (unsigned char *)&(g_plc_netcfg.wan.dns.addr),4);
-
-//    /*当前连接*/
-//    pMsg->mcp_RespBuff[51] =  (unsigned char)(GET_SD_ELEMENT_VALUE(SD223)>>0x08);
-//    pMsg->mcp_RespBuff[52] =  (unsigned char)(GET_SD_ELEMENT_VALUE(SD223)&0xFF);
-//    /*4G信号强度*/
-//    pMsg->mcp_RespBuff[53] = (unsigned char)(GET_SD_ELEMENT_VALUE(SD226)>>0x08);
-//    pMsg->mcp_RespBuff[54] = (unsigned char)(GET_SD_ELEMENT_VALUE(SD226)&0xFF);
-
-//    /*串口0*/
-////    unsigned short us_Pro = GET_UART_SD_VALUE(0, UART_SD_MODE_CONFIG);
-////    pMsg->mcp_RespBuff[55] = 0xFF & ( us_Pro >> 8 );
-////    pMsg->mcp_RespBuff[56] = 0xFF & us_Pro;
-//    /*串口1*/
-////    us_Pro = GET_UART_SD_VALUE(1, UART_SD_MODE_CONFIG);
-////    pMsg->mcp_RespBuff[57] = 0xFF & ( us_Pro >> 8 );
-////    pMsg->mcp_RespBuff[58] = 0xFF & us_Pro;
-//    /*COM2*/
-////    us_Pro = GET_UART_SD_VALUE(2, UART_SD_MODE_CONFIG);
-////    pMsg->mcp_RespBuff[59] = 0xFF & ( us_Pro >> 8 );
-////    pMsg->mcp_RespBuff[60] = 0xFF & us_Pro;
-//    /*预留COM3 ~ COM5*/
-//    pMsg->mcp_RespBuff[61] = 0;
-//    pMsg->mcp_RespBuff[62] = 0;
-
-//    pMsg->mcp_RespBuff[63] = 0;
-//    pMsg->mcp_RespBuff[64] = 0;
-
-//    pMsg->mcp_RespBuff[65] = 0;
-//    pMsg->mcp_RespBuff[66] = 0;
-
-//    /*系统运行时间*/
-////    uint32_t mlv_Systime = gKalykeSecondTickCurrent;
-////    printf("\r\n mlv_Systime = %u second\r\n", mlv_Systime);
-////    pMsg->mcp_RespBuff[67] = (unsigned char)(mlv_Systime >> 24);
-////    pMsg->mcp_RespBuff[68] = (unsigned char)(mlv_Systime >> 16);
-////    pMsg->mcp_RespBuff[69] = (unsigned char)(mlv_Systime >> 8);
-////    pMsg->mcp_RespBuff[70] = (unsigned char)(mlv_Systime);
-
-//    //版本号
-//    pMsg->mcp_RespBuff[71] = (unsigned char)(GET_SD_ELEMENT_VALUE(209)>>0x08);
-//    pMsg->mcp_RespBuff[72] = (unsigned char)(GET_SD_ELEMENT_VALUE(209)&0xFF);
-
-//    pMsg->mcp_RespBuff[73] = (unsigned char)(GET_SD_ELEMENT_VALUE(210)>>0x08);
-//    pMsg->mcp_RespBuff[74] = (unsigned char)(GET_SD_ELEMENT_VALUE(210)&0xFF);
-
-//    pMsg->mcp_RespBuff[75] = (unsigned char)(GET_SD_ELEMENT_VALUE(211)>>0x08);
-//    pMsg->mcp_RespBuff[76] = (unsigned char)(GET_SD_ELEMENT_VALUE(211)&0xFF);
-
-//    pMsg->mcp_RespBuff[77] = (unsigned char)(GET_SD_ELEMENT_VALUE(212)>>0x08);
-//    pMsg->mcp_RespBuff[78] = (unsigned char)(GET_SD_ELEMENT_VALUE(212)&0xFF);
-
-//    // LAN口FEXLINK扩展协议
-//    pMsg->mcp_RespBuff[79] = g_plc_netcfg.lan.ioExp;
-//    /*IP地址*/
-//    memcpy (&(pMsg->mcp_RespBuff[80]),(unsigned char *)&(g_plc_netcfg.lan.ip.addr),4);
-//    /*子网掩码*/
-//    memcpy (&(pMsg->mcp_RespBuff[84]),(unsigned char *)&(g_plc_netcfg.lan.mask.addr),4);
-//    /*网关*/
-//    memcpy (&(pMsg->mcp_RespBuff[88]),(unsigned char *)&(g_plc_netcfg.lan.gate.addr),4);
-
-//    // WAN口DHCP
-//    pMsg->mcp_RespBuff[92] = g_plc_netcfg.wan.notUseDHCP;
-
-
-//    /*保留空间填充0xBB*/
-//    for (i = 93; i < 100; i++)
-//    {
-//        pMsg->mcp_RespBuff[i] = 0xBB;
-//    }
 
 
     pMsg->msv_RespLen = 100;

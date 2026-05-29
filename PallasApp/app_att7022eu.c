@@ -18,6 +18,7 @@
 #include "app_oled.h"
 #include "kalyke_monitor_task.h"
 #include "module_ESE.h"
+#include "app_tou.h"           /* 分时计费功能头文件 */
 /*
  * Copyright (c) 2006-2018, Fexlink Development Team
  *
@@ -31,20 +32,6 @@
 /* Private includes ----------------------------------------------------------*/
 
 #if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFA
-//#include "FreeRTOS.h"
-//#include "task.h"
-//#include "semphr.h"
-//#include "main.h"
-//#include "pallas_es_log.h"
-//#include "pallas_es_param.h"
-//#include "module_ESM.h"
-//#include "module_ESE.h"
-//#include "module_ESC.h"
-
-//#include <stdlib.h>
-//#include <math.h>
-
-
 
 /* Private define ------------------------------------------------------------*/
 #define ATT7022_CSSet()    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET)
@@ -589,9 +576,9 @@ float Read_Current_LEAK(uint8_t phase)
     float ftemp;
 
     itemp = att7022_read_register(r_InRms + phase);  //剩余电流
-    //ftemp = (float)itemp;
+    ftemp = (float)itemp;
     ftemp = (float)itemp / _13_bit;
-    ftemp /= 1.122;
+    ftemp /= 2.243;
     //1: 1122
     //2: 2243
     //3: 3363
@@ -2859,6 +2846,8 @@ void Read_MeterPara(void)
     uint8_t i, isNeg, idx;
     uint32_t itemp;
     float ftemp;
+    uint8_t currentRate;                    /* 当前费率索引（分时计费） */
+    rtc_datetime_t touDateTime;            /* 当前RTC时间（分时计费） */
 
     gFlagMeterParam.SFlag = att7022_read_register(r_SFlag);    //读取EMU状态
     gFlagMeterParam.FlagUI = 0x00;                             //电压电流标志(正常)
@@ -2991,6 +2980,15 @@ void Read_MeterPara(void)
             CLEAR_BIT(gParam.st.State_Alarm[StateAlm0], StateAlm0_DUF_Msk);
         }
     }
+    //======================================================================
+    // 电能累计（含分时计费）
+    // 说明：ATT7022EU电能寄存器配置为"读后清零"模式，
+    // 每次读取获得自上次读取以来的电能增量。
+    // 将增量同时累加到总电能和分时电能中。
+    //======================================================================
+    // 获取当前RTC时间以确定当前费率时段
+    RTC_GetDatetime(&touDateTime);
+    currentRate = TOU_GetCurrentRate(&touDateTime);
     //有功电能----------------------------------------------------------------------------
     for(i = 0; i < 4; i++)
     {
@@ -2999,10 +2997,14 @@ void Read_MeterPara(void)
         if(gFlagMeterParam.PowQuad & (0x01 << i)) //反向
         {
             gMeterEnergy.EPE[i] += ftemp;
+            /* 分时计费：合相(i=3)反向有功按当前费率累计 */
+            if(i == 3) TOU_AccumulateEnergy(currentRate, 0, ftemp, 0, 0);
         }
         else //正向
         {
             gMeterEnergy.EPI[i] += ftemp;
+            /* 分时计费：合相(i=3)正向有功按当前费率累计 */
+            if(i == 3) TOU_AccumulateEnergy(currentRate, ftemp, 0, 0, 0);
         }
     }
     //全波无功电能------------------------------------------------------------------------
@@ -3013,16 +3015,22 @@ void Read_MeterPara(void)
         if(gFlagMeterParam.PowQuad & (0x10 << i)) //反向
         {
             gMeterEnergy.EQC[i] += ftemp;
+            /* 分时计费：合相(i=3)反向无功按当前费率累计 */
+            if(i == 3) TOU_AccumulateEnergy(currentRate, 0, 0, 0, ftemp);
         }
         else //正向
         {
             gMeterEnergy.EQL[i] += ftemp;
+            /* 分时计费：合相(i=3)正向无功按当前费率累计 */
+            if(i == 3) TOU_AccumulateEnergy(currentRate, 0, 0, ftemp, 0);
         }
     }
     flashcnt++;
     if(flashcnt >= 100)
     {
         Parameter_FlashWrite_InOnePage(PAR_RTU_INFO_SAVE_ADDR, sizeof(gMeterEnergy), &gMeterEnergy, &gflashOffset.energy); //存入flash
+        /* 同时将分时电能数据保存到Flash，确保掉电不丢失 */
+        TOU_SaveEnergy();
         flashcnt = 0;
     }
     //电压夹角计算-----------------------------------------------------------------------
@@ -3130,6 +3138,8 @@ void meter_clear_energy(unsigned short clr)
             gMeterEnergy.EQC[i] = 0;
         }
     }
+    /* 同时清零分时电能累计（全部费率清零） */
+    TOU_ClearEnergy(0xFF);
     Parameter_FlashWrite_InOnePage(PAR_RTU_INFO_SAVE_ADDR, sizeof(gMeterEnergy), &gMeterEnergy, &gflashOffset.energy); //存入flash
 }
 
@@ -3343,6 +3353,8 @@ void Init_TaskMetering(void)
     gFlagMeterParam.FlagUI = 0x00;
     gFlagMeterParam.PowQuad = 0x00;
 
+    /* 初始化分时计费模块（从Flash加载费率配置和已累计的分时电能） */
+    TOU_Init();
 }
 
 /**

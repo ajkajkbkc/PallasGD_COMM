@@ -20,17 +20,40 @@
 /* 0x803F800 ~ 0x803FFFF, 2K */
 //#define PAR_LTLIST_SAVE_ADDR        0x803F800 //雷电流数据存储
 
-/* 0x803F000 ~ 0x803F7FF, 2K */
-#define PAR_SAVE_ADDR               0x803F800      /////0x803F000 //存储flash_param_t
+// /* 0x803F000 ~ 0x803F7FF, 2K */
+// #define PAR_SAVE_ADDR               0x803F800      /////0x803F000 //存储flash_param_t
 
-/* 0x803E800 ~ 0x803EFFF, 2K */
-#define PAR_RTU_INFO_SAVE_ADDR      0x803F000 //终端信息 (MAX_RTU_NUM * 12 * 2 + 4 bytes = 724 bytes)
+// /* 0x803E800 ~ 0x803EFFF, 2K */
+// #define PAR_RTU_INFO_SAVE_ADDR      0x803F000 //终端信息 (MAX_RTU_NUM * 12 * 2 + 4 bytes = 724 bytes)
 
-/* 0x803D800 ~ 0x803E7FF, 4K */
-#define PAR_CTRL_INFO_SAVE_ADDR     0x803E000 //控制点信息 (MAX_CTRLP_NUM * 10 bytes = 3600 bytes)
+// /* 0x803D800 ~ 0x803E7FF, 4K */
+// #define PAR_CTRL_INFO_SAVE_ADDR     0x803E000 //控制点信息 (MAX_CTRLP_NUM * 10 bytes = 3600 bytes)
 
-/* 0x803B000 ~ 0x803D7FF, 10K */
-#define PLC_INFO_SAVE_ADDR          0x803B000 
+// /* 0x803B000 ~ 0x803D7FF, 10K */
+// #define PLC_INFO_SAVE_ADDR          0x803B000 
+
+/* 从 0x0803B000 到 0x0803FFFF 共 20KB，按从低到高依次分配 */
+#define PLC_INFO_BASE               0x0803B000
+#define PLC_INFO_SIZE               (10 * 1024)   // 10KB
+
+#define PAR_CTRL_INFO_BASE          0x0803D800
+#define PAR_CTRL_INFO_SIZE          (4 * 1024)    // 4KB
+
+#define PAR_RTU_INFO_BASE           0x0803E800
+#define PAR_RTU_INFO_SIZE           (2 * 1024)    // 2KB
+
+#define PAR_SAVE_BASE               0x0803F000
+#define PAR_SAVE_SIZE               (2 * 1024)    // 2KB
+
+#define PAR_LTLIST_BASE             0x0803F800
+#define PAR_LTLIST_SIZE             (2 * 1024)    // 2KB（预留）
+
+/* 可选：仍保留旧名称兼容 */
+#define PLC_INFO_SAVE_ADDR          PLC_INFO_BASE
+#define PAR_CTRL_INFO_SAVE_ADDR     PAR_CTRL_INFO_BASE
+#define PAR_RTU_INFO_SAVE_ADDR      PAR_RTU_INFO_BASE
+#define PAR_SAVE_ADDR               PAR_SAVE_BASE
+#define TOU_FLASH_SAVE_ADDR         PAR_LTLIST_BASE
 
 /* paramters ------------------------------------------------------*/
 #define PARAM_HALFWORDSIZE          128 //300  //param size 300 half-word(16-bit)
@@ -77,91 +100,6 @@
 #define SysErr0_Meter_Msk         0x0002
 
 /* Exported types ------------------------------------------------------------*/
-/* Thunder current monitor */
-//typedef struct
-//{
-//    uint8_t  Month;    //  01 06  月  //小端
-//    uint8_t  Year;     //  01 06  年
-//    uint8_t  Hour;     //  01 07  时
-//    uint8_t  Day;      //  01 07  日
-//    uint8_t  Second;   //  01 08  秒
-//    uint8_t  Minute;   //  01 08  分
-//    uint16_t Peak;     //  01 09  峰值
-//    uint16_t Polar;    //  01 0A  极性
-//    uint16_t KeepTime; //  01 0B  持续时间
-//    uint16_t reserved1;//  01 0C  空 预留
-//    uint16_t usQ;      //  01 0D  电荷量
-//    uint16_t usWR;     //  01 0E  单位能量
-//    uint16_t reserved2;//  01 0F  空 预留
-//} LtElem_st;  //占20byte
-
-/* SPD monitoring terminal */
-//typedef union
-//{
-//    uint16_t lsv_buff[16];
-//    struct
-//    {
-//        uint16_t  YL;         //  01 06  遥信
-//        uint16_t  KL;         //  01 07  空开
-//        uint16_t  Pe;         //  01 08  接地
-//        uint16_t  LtNum;      //  01 09  计数
-//        uint16_t  Reserved1;  //  01 0A  预留位01
-//        uint16_t  VolA;       //  01 0B  A相电压
-//        uint16_t  VolB;       //  01 0C  B相电压
-//        uint16_t  VolC;       //  01 0D  C相电压
-//        uint16_t  CurA;       //  01 0E  A相漏电流
-//        uint16_t  CurB;       //  01 0F  B相漏电流
-//        uint16_t  CurC;       //  01 10  C相漏电流
-//        uint16_t  Tmp1;       //  01 11  温度1
-//        uint16_t  Tmp2;       //  01 12  温度2
-//        uint16_t  Reserved2;  //  01 13  预留位02
-//        uint16_t  Life;       //  01 14  寿命
-//    } st;
-//} FS_Elem_st;  //占30byte
-
-///* smart SPD element */
-//typedef union
-//{
-//    uint16_t lsv_buff[17];
-//    struct
-//    {
-//        uint16_t  L1;         //  01 06  L1
-//        uint16_t  L2;         //  01 07  L2
-//        uint16_t  L3;         //  01 08  L3
-//        uint16_t  PE;         //  01 09  Pe
-//        uint16_t  SW[4];      //  01 0A  SW
-//        uint16_t  LtNum;      //  01 0E  计数
-//        uint16_t  Cur[3];     //  01 0F  A/B/C相漏电流
-//#if 0
-//        uint16_t  Tmp1;       //  01 12  温度1
-//        uint16_t  Tmp2;       //  01 13  温度2
-//        uint16_t  Tmp3;       //  01 14  温度3
-//        uint16_t  Tmp4;       //  01 15  温度4
-//#else
-//        int16_t  Tmp[4];      //  01 12  温度
-//#endif
-//        uint16_t  Life;       //  01 16  寿命
-//    } st;
-//} FSS_Elem_st;  //占40byte
-
-///* LT List */
-//typedef union
-//{
-//    uint16_t lsv_buff[LT_LSIT_SIZE];
-//    struct
-//    {
-//        uint32_t length;
-//        LtElem_st LtData[LT_MAX_NUM];
-//    } st;
-//} LtList_st;
-
-/* PLC List */
-//typedef union
-//{
-//    uint16_t lsv_buff[1];
-//} PLCList_st;
-
-//extern PLCList_st gplcList;
 
 typedef union
 {

@@ -864,6 +864,16 @@
               <FileType>5</FileType>
               <FilePath>..\PallasApp\NTP.h</FilePath>
             </File>
+            <File>
+              <FileName>app_tou.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\PallasApp\app_tou.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_tou.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\PallasApp\app_tou.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

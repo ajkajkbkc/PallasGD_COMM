@@ -8,104 +8,6 @@
 /* Private define ------------------------------------------------------------*/
 
 
-
-///* Private variables ---------------------------------------------------------*/
-///*
-//* Modbus 协议地址映射表，代码通过查表得到元件类型，物理元件编号
-//*/
-
-//static const mb_element_map_table_info stv_ModbusMapTable[] =
-//{
-//    /*AddrType          ElementType     AddrSection     StartAddr   EndAddr   StartElement  MaxNum*/
-////    {MB_BIT_ELEMENT,    MB_BIT_Y,       MB_SECTION_1,   0,          1199,     0,            256},
-////    {MB_BIT_ELEMENT,    MB_BIT_Y,       MB_SECTION_2,   10000,      11999,    256,          1792},
-
-////    {MB_BIT_ELEMENT,    MB_BIT_X,       MB_SECTION_1,   1200,       1999,     0,            256},
-////    {MB_BIT_ELEMENT,    MB_BIT_X,       MB_SECTION_2,   12000,      13999,    256,          1792},
-
-//    {MB_BIT_ELEMENT,    MB_BIT_M,       MB_SECTION_1,   2000,       4399,     0,            2048},
-//    {MB_BIT_ELEMENT,    MB_BIT_M,       MB_SECTION_2,   34000,      53999,    2048,         14336},
-
-////    {MB_BIT_ELEMENT,    MB_BIT_SM,      MB_SECTION_1,   4400,       5999,     0,            256},
-////    {MB_BIT_ELEMENT,    MB_BIT_SM,      MB_SECTION_2,   14000,      17999,    256,          3840},
-
-////    {MB_BIT_ELEMENT,    MB_BIT_S,       MB_SECTION_1,   6000,       7999,     0,            1024},
-////    {MB_BIT_ELEMENT,    MB_BIT_S,       MB_SECTION_2,   18000,      25999,    1024,         7168},
-
-////    {MB_BIT_ELEMENT,    MB_BIT_T,       MB_SECTION_1,   8000,       9199,     0,            256},
-////    {MB_BIT_ELEMENT,    MB_BIT_T,       MB_SECTION_2,   26000,      29999,    256,          256},
-
-////    {MB_BIT_ELEMENT,    MB_BIT_C,       MB_SECTION_1,   9200,       10000,    0,            256},
-////    {MB_BIT_ELEMENT,    MB_BIT_C,       MB_SECTION_2,   30000,      33999,    256,          256},
-
-//    {MB_WORD_ELEMENT,   MB_WORD_D,      MB_SECTION_1,   0,          7999,     0,            8000},
-
-////    {MB_WORD_ELEMENT,   MB_WORD_SD,     MB_SECTION_1,   8000,       8499,     0,            256},
-////    {MB_WORD_ELEMENT,   MB_WORD_SD,     MB_SECTION_2,   46000,      49999,    256,          3840},
-
-////    {MB_WORD_ELEMENT,   MB_WORD_Z,      MB_SECTION_1,   8500,       8999,     0,            16},
-////    {MB_WORD_ELEMENT,   MB_WORD_Z,      MB_SECTION_2,   10000,      11999,    16,           0},
-
-////    {MB_WORD_ELEMENT,   MB_WORD_T,      MB_SECTION_1,   9000,       9499,     0,            256},
-////    {MB_WORD_ELEMENT,   MB_WORD_T,      MB_SECTION_2,   50000,      53999,    256,          256},
-
-////    {MB_WORD_ELEMENT,   MB_WORD_C,      MB_SECTION_1,   9500,       9699,     0,            200},
-////    /*注意：32bit按照两个16bit来读，元件个数翻倍*/
-////    {MB_WORD_ELEMENT,   MB_WORD_C,      MB_SECTION_2,   9700,       9811,     200,          56 * 2},
-////    {MB_WORD_ELEMENT,   MB_WORD_C,      MB_SECTION_3,   54000,      61999,    256,          256 * 2},
-
-//    {MB_WORD_ELEMENT,   MB_WORD_R,      MB_SECTION_1,   13000,      45999,    0,            32768},
-
-//    {MB_ELEMENT_MAX,    0,              0,              0,          0,        0,            0},
-//};
-
-///**
-//  * @brief  Modbus 协议地址到物理元件地址转换
-//  * @param  None
-//  * @retval None
-//  */
-//unsigned char mb_slave_convert_element_info(unsigned char lcv_AddrType, unsigned short lsv_MbAddr, unsigned char *lcp_ElementType, unsigned short *lsp_ElementAddr)
-//{
-//    unsigned char i;
-
-//    /*根据寻址类型，定位搜索区段*/
-//    if(lcv_AddrType == MB_BIT_ELEMENT)
-//    {
-//        i = 0;
-//    }
-//    else
-//    {
-//        i = 14;
-//    }
-
-//    while(stv_ModbusMapTable[i].mcv_AddrType != MB_ELEMENT_MAX)
-//    {
-//        if(stv_ModbusMapTable[i].mcv_AddrType != lcv_AddrType)
-//        {
-//            i++;
-//            continue;
-//        }
-
-//        if((lsv_MbAddr >= stv_ModbusMapTable[i].msv_StartAddr) &&
-//                (lsv_MbAddr <= stv_ModbusMapTable[i].msv_EndAddr))
-//        {
-//            *lcp_ElementType = stv_ModbusMapTable[i].mcv_ElementType;
-//            *lsp_ElementAddr = lsv_MbAddr - stv_ModbusMapTable[i].msv_StartAddr + stv_ModbusMapTable[i].msv_StartElement;
-
-//            if(*lsp_ElementAddr >= stv_ModbusMapTable[i].msv_StartAddr + stv_ModbusMapTable[i].msv_MaxNum)
-//            {
-//                return pdFAIL;
-//            }
-
-//            return pdPASS;
-//        }
-
-//        i++;
-//    }
-
-//    return pdFAIL;
-//}
-
 static const mb_element_map_table_info stv_ModbusMapTable[] =
 {
     /*AddrType          ElementType              Broadcast        StartAddr   EndAddr   StartElement  MaxNum*/
@@ -136,13 +38,8 @@ static const mb_element_map_table_info stv_ModbusMapTable[] =
     {MB_WORD_ELEMENT,   MB_WORD_G1A3INTERVAL,    MB_NOBROADCAST,  0x0104,     0x0104,   0,            2       },
     {MB_WORD_ELEMENT,   MB_WORD_G1A3GETNUM,      MB_NOBROADCAST,  0x0105,     0x0105,   0,            2       },
     {MB_WORD_ELEMENT,   MB_WORD_VALUE,           MB_NOBROADCAST,  0x0106,     0x0181,   0,            124      },
-//    {MB_WORD_ELEMENT,   MB_WORD_SETDES4LIM,      MB_NOBROADCAST,  0x0134,     0x0134,   0,            4       },
-//    {MB_WORD_ELEMENT,   MB_WORD_SETDES4LIM,      MB_NOBROADCAST,  0x0145,     0x0145,   0,            4       }, /* 为了兼容旧工具 */
-//    {MB_WORD_ELEMENT,   MB_WORD_G1A3OFFSET,      MB_NOBROADCAST,  0x0180,     0x0181,   0,            2       },
-//    {MB_WORD_ELEMENT,   MB_WORD_RSTZIGBEE,       MB_BROADCAST,    0x0182,     0x0182,   0,            1       },
-
 #if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB
-    {MB_WORD_ELEMENT,   MB_WORD_POWER_QUALITY,   MB_NOBROADCAST,  0x0200,     0x0244,   0,            70      },
+    {MB_WORD_ELEMENT,   MB_WORD_POWER_QUALITY,   MB_NOBROADCAST,  0x0200,     0x0245,   0,            70      },  /* 0x0200~0x0245 = 70个地址，与MaxNum=70一致 */
     {MB_WORD_ELEMENT,   MB_WORD_HARMONIC,        MB_NOBROADCAST,  0x0246,     0x02FF,   0,            186     },
 #endif
     
@@ -158,7 +55,7 @@ static const mb_element_map_table_info stv_ModbusMapTable[] =
 //    {MB_WORD_ELEMENT,   MB_HALF_WORD_LTLIST,     MB_NOBROADCAST,  0x092D,     0x0D2C,   0,            LT_LSIT_SIZE},
 
 #if  PROD_TYPE == PROD_FSS
-    {MB_WORD_ELEMENT,   MB_WORD_METER,           MB_BROADCAST,    0x1000,     0x10FF,   0,            255     },
+    {MB_WORD_ELEMENT,   MB_WORD_METER,           MB_BROADCAST,    0x1000,     0x10FF,   0,            256     },
     {MB_WORD_ELEMENT,   MB_WORD_CALICMD,         MB_BROADCAST,    0x1100,     0x1100,   0,            1       },
 #elif PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFA
     {MB_WORD_ELEMENT,   MB_WORD_METER,           MB_BROADCAST,    0x1000,     0x10FF,   0,            255     },
@@ -168,7 +65,9 @@ static const mb_element_map_table_info stv_ModbusMapTable[] =
 #if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB
     {MB_WORD_ELEMENT,   MB_WORD_SYNC_SAMPLED,    MB_BROADCAST,    0x2000,     0x23FD,   0,            7 * 146 },  //1022 * 16bit
 #endif
-    
+#if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFA
+    {MB_WORD_ELEMENT,   MB_HALF_WORD_TOU,        MB_BROADCAST,    0x3000,     0x307F,   0,            128     },  /* TOU分时计费配置与电能 128个half-word */
+#endif    
     
     {MB_ELEMENT_MAX,    0,                       0,               0,          0,        0,            0       }
 };
