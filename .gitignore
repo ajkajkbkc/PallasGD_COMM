@@ -59,6 +59,12 @@ MDK-ARM/Objects/
 # 本地测试或临时工程子目录（如你之前出现的 Pallas_GD）
 MDK-ARM/Pallas_GD/
 
+# ================== 根据图片新增忽略 ==================
+# VS Code 在 MDK-ARM 下的本地配置和日志（整个文件夹）
+MDK-ARM/.vscode/
+# Keil 生成的 .lst 列表文件（如 startup_stm32f103xe.lst）
+MDK-ARM/*.lst
+
 # ================== 其他常见项目 ==================
 # CMSIS Pack 解压后的设备支持文件（通常由 RTE 管理，不提交）
 /CMSIS
