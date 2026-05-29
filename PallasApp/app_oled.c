@@ -1,0 +1,6945 @@
+/*
+ * Copyright (c) 2006-2018, Fexlink Development Team
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Change Logs:
+ * Date           Author       Notes
+ * 2022-06-23     Arrbow       first implementation
+ */
+
+/* Private includes ----------------------------------------------------------*/
+#include "app_oled.h"
+
+#if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFA
+#include <stdio.h>
+#include "app_main.h"
+#include "oled_i2c.h"
+#include "oled_codetab.h"
+#include "app_log.h"
+#include "app_tool.h"
+#include "app_parameter.h"
+#include "app_key.h"
+#include "app_version.h"
+#include "app_att7022.h"
+#include "app_att7022eu.h"
+#include "app_led.h"
+#include "flexible_button.h"
+#include "plc_netcfg.h"
+#include "plc_element.h"
+#include "module_ESE.h"
+#include "kalyke_monitor_task.h"
+/* Private define ------------------------------------------------------------*/
+
+#define  SysErr0_Oled_Msk         0x0001
+#define  KEY_TURNON_LEVEL         1
+
+/* Private variables ---------------------------------------------------------*/
+/* Definitions for Task */
+osThreadId_t keyOledTaskHandle;
+const osThreadAttr_t keyOledTask_attributes =
+{
+    .name = "keyOledTask",
+    .priority = (osPriority_t) keyTaskOLEDPriority,
+    .stack_size = 1024
+};
+
+#if PRINT_LOG_OPEN == 1
+static const char *TAG = "KeyOled";
+#endif
+
+volatile uint8_t gWANor4G = 0;
+static flex_button_t iotb_user_button[USER_BUTTON_MAX];
+volatile uint8_t key_scan_cycle = KEY_SCAN_CYCLE;
+bool iotb_button_scan_enable = true;
+volatile uint8_t btnow = 0;
+uint32_t gTemp_config_param; //临时配置参数
+key_oled_run_info_t gOledRunInfo;
+volatile uint8_t AlarmChange = 1;
+
+#if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFA
+key_oled_gui_d g_oled_display_table[] =
+{
+    //开始界面
+    {GUI_START, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_start_gui},
+    //主菜单
+    {GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_LOOKUP_PARAM, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui},
+    {GUI_MAIN_MENU_POINT_LOOKUP_PARAM, GUI_MAIN_MENU_POINT_COMMON_CONFIG, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui},
+    {GUI_MAIN_MENU_POINT_COMMON_CONFIG, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, oled_display_main_menu_gui},
+    {GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_MAIN_MENU_POINT_ALARM_INFO, GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, oled_display_main_menu_gui},
+    {GUI_MAIN_MENU_POINT_ALARM_INFO, GUI_MAIN_MENU_POINT_COM_INFO, GUI_ALARM_INFO, oled_display_main_menu_gui},
+    {GUI_MAIN_MENU_POINT_COM_INFO, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_COM_INFO, oled_display_main_menu_gui},
+    
+#if PROD_TYPE == PROD_SFA     
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui},
+#endif
+    
+#if PROD_TYPE == PROD_SFB
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui},
+    {GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, oled_display_main_menu_gui},
+#endif
+    
+#if PROD_TYPE == PROD_SFE
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui},
+    {GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, oled_display_main_menu_gui},
+    {GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_U, oled_display_main_menu_gui},
+#endif
+    //通用设置
+    {GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, GUI_CONFIG_MODBUS_ADDR, oled_display_common_config_gui},
+    {GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, GUI_COMMON_CONFIG_POINT_FMW_VERSION, GUI_CONFIG_SERIAL_NUMBER, oled_display_common_config_gui},
+    {GUI_COMMON_CONFIG_POINT_FMW_VERSION, GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_CONFIG_FMW_VERSION, oled_display_common_config_gui},
+    {GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_COMMON_CONFIG_POINT_RESET, GUI_CONFIG_FACTORY_RESET_POINT_NO, oled_display_common_config_gui},
+    {GUI_COMMON_CONFIG_POINT_RESET, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_START, oled_display_common_config_gui},
+    //通用设置内容
+    {GUI_CONFIG_MODBUS_ADDR, GUI_CONFIG_MODBUS_ADDR, GUI_START, oled_display_config_modbus_addr_gui},
+    {GUI_CONFIG_SERIAL_NUMBER, GUI_START, GUI_START, oled_display_config_serial_number_gui},
+    {GUI_CONFIG_FMW_VERSION, GUI_START, GUI_START, oled_display_config_fmw_version_gui},
+    {GUI_CONFIG_FACTORY_RESET_POINT_NO, GUI_CONFIG_FACTORY_RESET_POINT_YES, GUI_START, oled_display_config_factory_reset_gui},
+    {GUI_CONFIG_FACTORY_RESET_POINT_YES, GUI_CONFIG_FACTORY_RESET_POINT_NO, GUI_START, oled_display_config_factory_reset_gui},
+
+    /* --------- module -------- */
+    //查询参数
+    {GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_LOOKUP_PARAM_POINT_U12_U23_U31, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_U12_U23_U31, GUI_LOOKUP_PARAM_POINT_F, GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_F, GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_F, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_LOOKUP_PARAM_POINT_P1_P2_P3, GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_P1_P2_P3, GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, GUI_LOOKUP_PARAM_POINT_P_Q_S, GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_P_Q_S, GUI_LOOKUP_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_P_Q_S, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_PF, GUI_LOOKUP_PARAM_POINT_DI1_DI2, GUI_ELECTRIC_PARAM_POINT_PF, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_DI1_DI2, GUI_LOOKUP_PARAM_POINT_DO1_DO2, GUI_ELECTRIC_PARAM_POINT_DI1_DI2, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_DO1_DO2, GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_DO1_DO2, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_LOOKUP_PARAM_POINT_T1_T2, GUI_ELECTRIC_PARAM_POINT_CURRENT, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_T1_T2, GUI_LOOKUP_PARAM_POINT_T3_T4, GUI_ELECTRIC_PARAM_POINT_T1_T2, module_oled_display_lookup_param_gui},
+    {GUI_LOOKUP_PARAM_POINT_T3_T4, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_T3_T4, module_oled_display_lookup_param_gui},
+
+    //电气参数
+    {GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, GUI_ELECTRIC_PARAM_POINT_F, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_F, GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, GUI_ELECTRIC_PARAM_POINT_P_Q_S, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_P_Q_S, GUI_ELECTRIC_PARAM_POINT_PF, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_DI1_DI2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_DI1_DI2, GUI_ELECTRIC_PARAM_POINT_DO1_DO2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_DO1_DO2, GUI_ELECTRIC_PARAM_POINT_CURRENT, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_T1_T2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_T1_T2, GUI_ELECTRIC_PARAM_POINT_T3_T4, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_T3_T4, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    
+    //报警信息
+    {GUI_ALARM_INFO, GUI_ALARM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_alarm_info},
+    //网关信息
+    {GUI_COM_INFO, GUI_COM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_com_info},
+    //模组设置
+    {GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, GUI_MODULE_CONFIG_POINT_CURRENT_THUP, GUI_OUTPUT_CONTROL_POINT_NORMAL, module_oled_display_module_config_gui},
+    {GUI_MODULE_CONFIG_POINT_CURRENT_THUP, GUI_MODULE_CONFIG_POINT_TEMP_THUP, GUI_CONFIG_CURRENT_THUP, module_oled_display_module_config_gui},
+    {GUI_MODULE_CONFIG_POINT_TEMP_THUP, GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, GUI_CONFIG_TEMP_THUP, module_oled_display_module_config_gui},
+    //输出控制
+    {GUI_OUTPUT_CONTROL_POINT_NORMAL, GUI_OUTPUT_CONTROL_POINT_ALARM, GUI_START, module_oled_display_output_control_gui},
+    {GUI_OUTPUT_CONTROL_POINT_ALARM, GUI_OUTPUT_CONTROL_POINT_CANCEL, GUI_START, module_oled_display_output_control_gui},
+    {GUI_OUTPUT_CONTROL_POINT_CANCEL, GUI_OUTPUT_CONTROL_POINT_NORMAL, GUI_START, module_oled_display_output_control_gui},
+    //电流上限
+    {GUI_CONFIG_CURRENT_THUP, GUI_CONFIG_CURRENT_THUP, GUI_START, module_oled_display_config_current_thup_gui},
+    //温度上限
+    {GUI_CONFIG_TEMP_THUP, GUI_CONFIG_TEMP_THUP, GUI_START, module_oled_display_config_temp_thup_gui},
+
+    //电能查询
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, GUI_ENERGY_PARAM_POINT_EPI, module_oled_display_energy_param_lookup_gui},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, GUI_ENERGY_PARAM_LOOKUP_POINT_EP, GUI_ENERGY_PARAM_POINT_EPE, module_oled_display_energy_param_lookup_gui},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EP, GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_POINT_EP, module_oled_display_energy_param_lookup_gui},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, GUI_ENERGY_PARAM_POINT_EQL, module_oled_display_energy_param_lookup_gui},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, GUI_ENERGY_PARAM_POINT_EQC, module_oled_display_energy_param_lookup_gui},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQ, module_oled_display_energy_param_lookup_gui},
+
+    //电能参数
+    {GUI_ENERGY_PARAM_POINT_EPI, GUI_ENERGY_PARAM_POINT_EPE, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EPE, GUI_ENERGY_PARAM_POINT_EP, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EP, GUI_ENERGY_PARAM_POINT_EQL, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQL, GUI_ENERGY_PARAM_POINT_EQC, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQC, GUI_ENERGY_PARAM_POINT_EQ, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQ, GUI_ENERGY_PARAM_POINT_EPI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    
+#if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB
+    //相位查询
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, GUI_HARMONIC_PARAM_POINT_AgU, module_oled_display_harmonic_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, GUI_HARMONIC_PARAM_POINT_AgI, module_oled_display_harmonic_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_DvU, module_oled_display_harmonic_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, GUI_HARMONIC_PARAM_POINT_DvUL, module_oled_display_harmonic_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, GUI_HARMONIC_PARAM_POINT_DvF, module_oled_display_harmonic_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_ImbU, module_oled_display_harmonic_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_POINT_ImbI, module_oled_display_harmonic_param_lookup_gui},
+#if PROD_TYPE == PROD_SFE   
+    //谐波查询   
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_U, GUI_HARMONIC_PARAM_LOOKUP_POINT_I, GUI_HARMONIC_PARAM_POINT_U, module_oled_display_harmonicUI_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_I, GUI_HARMONIC_PARAM_LOOKUP_POINT_U, GUI_HARMONIC_PARAM_POINT_I, module_oled_display_harmonicUI_param_lookup_gui},
+#endif    
+    //相位参数
+    {GUI_HARMONIC_PARAM_POINT_AgU, GUI_HARMONIC_PARAM_POINT_AgI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_AgI, GUI_HARMONIC_PARAM_POINT_DvU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvU, GUI_HARMONIC_PARAM_POINT_DvUL, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_DvF, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvF, GUI_HARMONIC_PARAM_POINT_ImbU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_ImbU, GUI_HARMONIC_PARAM_POINT_ImbI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_AgU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},    
+#if PROD_TYPE == PROD_SFE     
+    //谐波参数
+    {GUI_HARMONIC_PARAM_POINT_U, GUI_HARMONIC_PARAM_POINT_I, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonicUI_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_I, GUI_HARMONIC_PARAM_POINT_U, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonicUI_param_gui},
+#endif    
+#endif
+};
+
+key_oled_gui_u g_oled_display_table_u[] =
+{
+    //开始界面
+    {GUI_START, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_start_gui},
+    //主菜单
+#if PROD_TYPE == PROD_SFA    
+    {GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui_u},
+#endif  
+#if PROD_TYPE == PROD_SFB    
+    {GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui_u},
+#endif
+#if PROD_TYPE == PROD_SFE    
+    {GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui_u},
+#endif    
+    {GUI_MAIN_MENU_POINT_LOOKUP_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui_u},
+    {GUI_MAIN_MENU_POINT_COMMON_CONFIG, GUI_MAIN_MENU_POINT_LOOKUP_PARAM, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, oled_display_main_menu_gui_u},
+    {GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_MAIN_MENU_POINT_COMMON_CONFIG, GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, oled_display_main_menu_gui_u},
+    {GUI_MAIN_MENU_POINT_ALARM_INFO, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_ALARM_INFO, oled_display_main_menu_gui_u},
+    {GUI_MAIN_MENU_POINT_COM_INFO, GUI_MAIN_MENU_POINT_ALARM_INFO, GUI_COM_INFO, oled_display_main_menu_gui_u},
+    
+#if PROD_TYPE == PROD_SFA   
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_COM_INFO, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_u},
+#endif         
+#if PROD_TYPE == PROD_SFB    
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_COM_INFO, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_u},
+    {GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, oled_display_main_menu_gui_u},
+#endif        
+#if PROD_TYPE == PROD_SFE
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_COM_INFO, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_u},
+    {GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, oled_display_main_menu_gui_u},
+    {GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_U, oled_display_main_menu_gui_u},
+#endif    
+    //通用设置
+    {GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_COMMON_CONFIG_POINT_RESET, GUI_CONFIG_MODBUS_ADDR, oled_display_common_config_gui_u},
+    {GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_CONFIG_SERIAL_NUMBER, oled_display_common_config_gui_u},
+    {GUI_COMMON_CONFIG_POINT_FMW_VERSION, GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, GUI_CONFIG_FMW_VERSION, oled_display_common_config_gui_u},
+    {GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_COMMON_CONFIG_POINT_FMW_VERSION, GUI_CONFIG_FACTORY_RESET_POINT_NO, oled_display_common_config_gui_u},
+    {GUI_COMMON_CONFIG_POINT_RESET, GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_START, oled_display_common_config_gui_u},
+    //通用设置内容
+    {GUI_CONFIG_MODBUS_ADDR, GUI_CONFIG_MODBUS_ADDR, GUI_START, oled_display_config_modbus_addr_gui},
+    {GUI_CONFIG_SERIAL_NUMBER, GUI_START, GUI_START, oled_display_config_serial_number_gui},
+    {GUI_CONFIG_FMW_VERSION, GUI_START, GUI_START, oled_display_config_fmw_version_gui},
+    {GUI_CONFIG_FACTORY_RESET_POINT_NO, GUI_CONFIG_FACTORY_RESET_POINT_YES, GUI_START, oled_display_config_factory_reset_gui},
+    {GUI_CONFIG_FACTORY_RESET_POINT_YES, GUI_CONFIG_FACTORY_RESET_POINT_NO, GUI_START, oled_display_config_factory_reset_gui},
+
+    /* --------- module -------- */
+    //查询参数
+    {GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_LOOKUP_PARAM_POINT_T3_T4, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_U12_U23_U31, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_F, GUI_LOOKUP_PARAM_POINT_U12_U23_U31, GUI_ELECTRIC_PARAM_POINT_F, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_LOOKUP_PARAM_POINT_F, GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_P1_P2_P3, GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, GUI_LOOKUP_PARAM_POINT_P1_P2_P3, GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_P_Q_S, GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, GUI_ELECTRIC_PARAM_POINT_P_Q_S, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_PF, GUI_LOOKUP_PARAM_POINT_P_Q_S, GUI_ELECTRIC_PARAM_POINT_PF, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_DI1_DI2, GUI_LOOKUP_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_DI1_DI2, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_DO1_DO2, GUI_LOOKUP_PARAM_POINT_DI1_DI2, GUI_ELECTRIC_PARAM_POINT_DO1_DO2, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_LOOKUP_PARAM_POINT_DO1_DO2, GUI_ELECTRIC_PARAM_POINT_CURRENT, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_T1_T2, GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_T1_T2, module_oled_display_lookup_param_gui_u},
+    {GUI_LOOKUP_PARAM_POINT_T3_T4, GUI_LOOKUP_PARAM_POINT_T1_T2, GUI_ELECTRIC_PARAM_POINT_T3_T4, module_oled_display_lookup_param_gui_u},
+
+    //电气参数
+    {GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_T3_T4, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_F, GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_F, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_P_Q_S, GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_P_Q_S, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_DI1_DI2, GUI_ELECTRIC_PARAM_POINT_PF, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_DO1_DO2, GUI_ELECTRIC_PARAM_POINT_DI1_DI2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_DO1_DO2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_T1_T2, GUI_ELECTRIC_PARAM_POINT_CURRENT, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_T3_T4, GUI_ELECTRIC_PARAM_POINT_T1_T2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    
+    //报警信息
+    {GUI_ALARM_INFO, GUI_ALARM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_alarm_info},
+    //网关信息
+    {GUI_COM_INFO, GUI_COM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_com_info},
+    //模组设置
+    {GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, GUI_MODULE_CONFIG_POINT_TEMP_THUP, GUI_OUTPUT_CONTROL_POINT_NORMAL, module_oled_display_module_config_gui_u},
+    {GUI_MODULE_CONFIG_POINT_CURRENT_THUP, GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, GUI_CONFIG_CURRENT_THUP, module_oled_display_module_config_gui_u},
+    {GUI_MODULE_CONFIG_POINT_TEMP_THUP, GUI_MODULE_CONFIG_POINT_CURRENT_THUP, GUI_CONFIG_TEMP_THUP, module_oled_display_module_config_gui_u},
+    //输出控制
+    {GUI_OUTPUT_CONTROL_POINT_NORMAL, GUI_OUTPUT_CONTROL_POINT_CANCEL, GUI_START, module_oled_display_output_control_gui_u},
+    {GUI_OUTPUT_CONTROL_POINT_ALARM, GUI_OUTPUT_CONTROL_POINT_NORMAL, GUI_START, module_oled_display_output_control_gui_u},
+    {GUI_OUTPUT_CONTROL_POINT_CANCEL, GUI_OUTPUT_CONTROL_POINT_ALARM, GUI_START, module_oled_display_output_control_gui_u},
+    //电流上限
+    {GUI_CONFIG_CURRENT_THUP, GUI_CONFIG_CURRENT_THUP, GUI_START, module_oled_display_config_current_thup_gui},
+    //温度上限
+    {GUI_CONFIG_TEMP_THUP, GUI_CONFIG_TEMP_THUP, GUI_START, module_oled_display_config_temp_thup_gui},
+    
+    //电能查询
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, GUI_ENERGY_PARAM_POINT_EPI, module_oled_display_energy_param_lookup_gui_u},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_POINT_EPE, module_oled_display_energy_param_lookup_gui_u},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EP, GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, GUI_ENERGY_PARAM_POINT_EP, module_oled_display_energy_param_lookup_gui_u},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_LOOKUP_POINT_EP, GUI_ENERGY_PARAM_POINT_EQL, module_oled_display_energy_param_lookup_gui_u},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_POINT_EQC, module_oled_display_energy_param_lookup_gui_u},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, GUI_ENERGY_PARAM_POINT_EQ, module_oled_display_energy_param_lookup_gui_u},
+
+    //电能参数
+    {GUI_ENERGY_PARAM_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQ, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EPE, GUI_ENERGY_PARAM_POINT_EPI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EP, GUI_ENERGY_PARAM_POINT_EPE, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQL, GUI_ENERGY_PARAM_POINT_EP, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQC, GUI_ENERGY_PARAM_POINT_EQL, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQ, GUI_ENERGY_PARAM_POINT_EQC, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+ 
+#if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB    
+    //相位查询
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_AgU, module_oled_display_harmonic_param_lookup_gui_u},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_POINT_AgI, module_oled_display_harmonic_param_lookup_gui_u},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, GUI_HARMONIC_PARAM_POINT_DvU, module_oled_display_harmonic_param_lookup_gui_u},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, GUI_HARMONIC_PARAM_POINT_DvUL, module_oled_display_harmonic_param_lookup_gui_u},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_DvF, module_oled_display_harmonic_param_lookup_gui_u},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, GUI_HARMONIC_PARAM_POINT_ImbU, module_oled_display_harmonic_param_lookup_gui_u},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, GUI_HARMONIC_PARAM_POINT_ImbI, module_oled_display_harmonic_param_lookup_gui_u},
+#if PROD_TYPE == PROD_SFE  
+    //谐波查询   
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_U, GUI_HARMONIC_PARAM_LOOKUP_POINT_I, GUI_HARMONIC_PARAM_POINT_U, module_oled_display_harmonicUI_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_I, GUI_HARMONIC_PARAM_LOOKUP_POINT_U, GUI_HARMONIC_PARAM_POINT_I, module_oled_display_harmonicUI_param_lookup_gui},
+#endif
+    //相位参数
+    {GUI_HARMONIC_PARAM_POINT_AgU, GUI_HARMONIC_PARAM_POINT_ImbI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_AgI, GUI_HARMONIC_PARAM_POINT_AgU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvU, GUI_HARMONIC_PARAM_POINT_AgI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_DvU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvF, GUI_HARMONIC_PARAM_POINT_DvUL, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_ImbU, GUI_HARMONIC_PARAM_POINT_DvF, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_ImbU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},    
+#if PROD_TYPE == PROD_SFE      
+    //谐波参数
+    {GUI_HARMONIC_PARAM_POINT_U, GUI_HARMONIC_PARAM_POINT_I, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonicUI_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_I, GUI_HARMONIC_PARAM_POINT_U, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonicUI_param_gui},
+#endif
+#endif
+};
+
+key_oled_gui_r g_oled_display_table_r[] =
+{
+    //开始界面
+    {GUI_START, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_start_gui},
+    //主菜单
+    {GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui_r},
+    {GUI_MAIN_MENU_POINT_LOOKUP_PARAM, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui_r},
+    {GUI_MAIN_MENU_POINT_COMMON_CONFIG, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, oled_display_main_menu_gui_r},
+    {GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, oled_display_main_menu_gui_r},
+    {GUI_MAIN_MENU_POINT_ALARM_INFO, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_ALARM_INFO, oled_display_main_menu_gui_r},
+    {GUI_MAIN_MENU_POINT_COM_INFO, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_COM_INFO, oled_display_main_menu_gui_r},
+#if PROD_TYPE == PROD_SFA
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_r},
+#endif  
+#if PROD_TYPE == PROD_SFB
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_r},
+    {GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, oled_display_main_menu_gui_r},
+#endif      
+#if PROD_TYPE == PROD_SFE
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_r},
+    {GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, oled_display_main_menu_gui_r},
+    {GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_HARMONIC_PARAM_LOOKUP_POINT_U, oled_display_main_menu_gui_r},
+#endif   
+    //通用设置
+    {GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_CONFIG_MODBUS_ADDR, oled_display_common_config_gui_r},
+    {GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_CONFIG_SERIAL_NUMBER, oled_display_common_config_gui_r},
+    {GUI_COMMON_CONFIG_POINT_FMW_VERSION, GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_CONFIG_FMW_VERSION, oled_display_common_config_gui_r},
+    {GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_CONFIG_FACTORY_RESET_POINT_NO, oled_display_common_config_gui_r},
+    {GUI_COMMON_CONFIG_POINT_RESET, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_START, oled_display_common_config_gui_r},
+    //通用设置内容
+    {GUI_CONFIG_MODBUS_ADDR, GUI_CONFIG_MODBUS_ADDR, GUI_START, oled_display_config_modbus_addr_gui},
+    {GUI_CONFIG_SERIAL_NUMBER, GUI_START, GUI_START, oled_display_config_serial_number_gui},
+    {GUI_CONFIG_FMW_VERSION, GUI_START, GUI_START, oled_display_config_fmw_version_gui},
+    {GUI_CONFIG_FACTORY_RESET_POINT_NO, GUI_CONFIG_FACTORY_RESET_POINT_YES, GUI_START, oled_display_config_factory_reset_gui},
+    {GUI_CONFIG_FACTORY_RESET_POINT_YES, GUI_CONFIG_FACTORY_RESET_POINT_NO, GUI_START, oled_display_config_factory_reset_gui},
+
+    /* --------- module -------- */
+    //查询参数
+    {GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_U12_U23_U31, GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_F, GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_F, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_P1_P2_P3, GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_LOOKUP_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, GUI_LOOKUP_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_P_Q_S, GUI_LOOKUP_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_P_Q_S, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_PF, GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_PF, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_DI1_DI2, GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_DI1_DI2, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_DO1_DO2, GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_DO1_DO2, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_CURRENT, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_T1_T2, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_T1_T2, module_oled_display_lookup_param_gui_r},
+    {GUI_LOOKUP_PARAM_POINT_T3_T4, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_T3_T4, module_oled_display_lookup_param_gui_r},
+
+    //电气参数
+    {GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, GUI_ELECTRIC_PARAM_POINT_F, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_F, GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, GUI_ELECTRIC_PARAM_POINT_P_Q_S, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_P_Q_S, GUI_ELECTRIC_PARAM_POINT_PF, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_DI1_DI2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_DI1_DI2, GUI_ELECTRIC_PARAM_POINT_DO1_DO2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_DO1_DO2, GUI_ELECTRIC_PARAM_POINT_CURRENT, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_T1_T2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_T1_T2, GUI_ELECTRIC_PARAM_POINT_T3_T4, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_T3_T4, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    
+    //报警信息
+    {GUI_ALARM_INFO, GUI_ALARM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_alarm_info},
+    //网关信息
+    {GUI_COM_INFO, GUI_COM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_com_info},
+    //模组设置
+    {GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, GUI_MODULE_CONFIG_POINT_CURRENT_THUP, GUI_OUTPUT_CONTROL_POINT_NORMAL, module_oled_display_module_config_gui},
+    {GUI_MODULE_CONFIG_POINT_CURRENT_THUP, GUI_MODULE_CONFIG_POINT_TEMP_THUP, GUI_CONFIG_CURRENT_THUP, module_oled_display_module_config_gui},
+    {GUI_MODULE_CONFIG_POINT_TEMP_THUP, GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, GUI_CONFIG_TEMP_THUP, module_oled_display_module_config_gui},
+    //输出控制
+    {GUI_OUTPUT_CONTROL_POINT_NORMAL, GUI_OUTPUT_CONTROL_POINT_ALARM, GUI_START, module_oled_display_output_control_gui},
+    {GUI_OUTPUT_CONTROL_POINT_ALARM, GUI_OUTPUT_CONTROL_POINT_CANCEL, GUI_START, module_oled_display_output_control_gui},
+    {GUI_OUTPUT_CONTROL_POINT_CANCEL, GUI_OUTPUT_CONTROL_POINT_NORMAL, GUI_START, module_oled_display_output_control_gui},
+    //电流上限
+    {GUI_CONFIG_CURRENT_THUP, GUI_CONFIG_CURRENT_THUP, GUI_START, module_oled_display_config_current_thup_gui},
+    //温度上限
+    {GUI_CONFIG_TEMP_THUP, GUI_CONFIG_TEMP_THUP, GUI_START, module_oled_display_config_temp_thup_gui},
+
+    //电能查询
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_POINT_EPI, module_oled_display_energy_param_lookup_gui_r},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_POINT_EPE, module_oled_display_energy_param_lookup_gui_r},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EP, GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_POINT_EP, module_oled_display_energy_param_lookup_gui_r},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQL, module_oled_display_energy_param_lookup_gui_r},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQC, module_oled_display_energy_param_lookup_gui_r},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQ, module_oled_display_energy_param_lookup_gui_r},
+
+    //电能参数
+    {GUI_ENERGY_PARAM_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQ, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EPE, GUI_ENERGY_PARAM_POINT_EPI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EP, GUI_ENERGY_PARAM_POINT_EPE, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQL, GUI_ENERGY_PARAM_POINT_EP, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQC, GUI_ENERGY_PARAM_POINT_EQL, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQ, GUI_ENERGY_PARAM_POINT_EQC, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    
+#if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB    
+    //相位查询
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_AgU, module_oled_display_harmonic_param_lookup_gui_r},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_AgI, module_oled_display_harmonic_param_lookup_gui_r},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_DvU, module_oled_display_harmonic_param_lookup_gui_r},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_DvUL, module_oled_display_harmonic_param_lookup_gui_r},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_DvF, module_oled_display_harmonic_param_lookup_gui_r},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_ImbU, module_oled_display_harmonic_param_lookup_gui_r},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_POINT_ImbI, module_oled_display_harmonic_param_lookup_gui_r},
+#if PROD_TYPE == PROD_SFE    
+    //谐波查询   
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_U, GUI_HARMONIC_PARAM_LOOKUP_POINT_I, GUI_HARMONIC_PARAM_POINT_U, module_oled_display_harmonicUI_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_I, GUI_HARMONIC_PARAM_LOOKUP_POINT_U, GUI_HARMONIC_PARAM_POINT_I, module_oled_display_harmonicUI_param_lookup_gui},
+#endif
+    //相位参数
+    {GUI_HARMONIC_PARAM_POINT_AgU, GUI_HARMONIC_PARAM_POINT_ImbI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_AgI, GUI_HARMONIC_PARAM_POINT_AgU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvU, GUI_HARMONIC_PARAM_POINT_AgI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_DvU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvF, GUI_HARMONIC_PARAM_POINT_DvUL, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_ImbU, GUI_HARMONIC_PARAM_POINT_DvF, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_ImbU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+#if PROD_TYPE == PROD_SFE      
+    //谐波参数
+    {GUI_HARMONIC_PARAM_POINT_U, GUI_HARMONIC_PARAM_POINT_I, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonicUI_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_I, GUI_HARMONIC_PARAM_POINT_U, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonicUI_param_gui},
+#endif
+#endif
+};
+
+key_oled_gui_l g_oled_display_table_l[] =
+{
+    //开始界面
+    {GUI_START, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_start_gui},
+    //主菜单
+    {GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui_l},
+    {GUI_MAIN_MENU_POINT_LOOKUP_PARAM, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, oled_display_main_menu_gui_l},
+    {GUI_MAIN_MENU_POINT_COMMON_CONFIG, GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, oled_display_main_menu_gui_l},
+    {GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, oled_display_main_menu_gui_l},
+    {GUI_MAIN_MENU_POINT_ALARM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_ALARM_INFO, oled_display_main_menu_gui_l},
+    {GUI_MAIN_MENU_POINT_COM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, GUI_COM_INFO, oled_display_main_menu_gui_l},
+#if PROD_TYPE == PROD_SFA   
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_l},
+#endif      
+#if PROD_TYPE == PROD_SFB  
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_l},
+    {GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, oled_display_main_menu_gui_l},
+#endif      
+#if PROD_TYPE == PROD_SFE   
+    {GUI_MAIN_MENU_POINT_ENERGY_PARAM, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, oled_display_main_menu_gui_l},
+    {GUI_MAIN_MENU_POINT_HARMONIC_PARAM, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, oled_display_main_menu_gui_l},
+    {GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, GUI_MAIN_MENU_POINT_MODULE_CONFIG, GUI_HARMONIC_PARAM_LOOKUP_POINT_U, oled_display_main_menu_gui_l},
+#endif       
+    //通用设置
+    {GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_CONFIG_MODBUS_ADDR, oled_display_common_config_gui_l},
+    {GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_CONFIG_SERIAL_NUMBER, oled_display_common_config_gui_l},
+    {GUI_COMMON_CONFIG_POINT_FMW_VERSION, GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_CONFIG_FMW_VERSION, oled_display_common_config_gui_l},
+    {GUI_COMMON_CONFIG_POINT_FACTORY_RESET, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_CONFIG_FACTORY_RESET_POINT_NO, oled_display_common_config_gui_l},
+    {GUI_COMMON_CONFIG_POINT_RESET, GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, GUI_START, oled_display_common_config_gui_l},
+    //通用设置内容
+    {GUI_CONFIG_MODBUS_ADDR, GUI_CONFIG_MODBUS_ADDR, GUI_START, oled_display_config_modbus_addr_gui},
+    {GUI_CONFIG_SERIAL_NUMBER, GUI_START, GUI_START, oled_display_config_serial_number_gui},
+    {GUI_CONFIG_FMW_VERSION, GUI_START, GUI_START, oled_display_config_fmw_version_gui},
+    {GUI_CONFIG_FACTORY_RESET_POINT_NO, GUI_CONFIG_FACTORY_RESET_POINT_YES, GUI_START, oled_display_config_factory_reset_gui},
+    {GUI_CONFIG_FACTORY_RESET_POINT_YES, GUI_CONFIG_FACTORY_RESET_POINT_NO, GUI_START, oled_display_config_factory_reset_gui},
+
+    /* --------- module -------- */
+//查询参数
+    {GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_U12_U23_U31, GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_F, GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_F, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_P1_P2_P3, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, GUI_LOOKUP_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_P_Q_S, GUI_LOOKUP_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_P_Q_S, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_PF, GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_PF, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_DI1_DI2, GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_DI1_DI2, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_DO1_DO2, GUI_LOOKUP_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_DO1_DO2, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_CURRENT, GUI_LOOKUP_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_CURRENT, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_T1_T2, GUI_LOOKUP_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_T1_T2, module_oled_display_lookup_param_gui_l},
+    {GUI_LOOKUP_PARAM_POINT_T3_T4, GUI_LOOKUP_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_T3_T4, module_oled_display_lookup_param_gui_l},
+
+    //电气参数
+    {GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, GUI_ELECTRIC_PARAM_POINT_T3_T4, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, GUI_ELECTRIC_PARAM_POINT_U1_U2_U3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_F, GUI_ELECTRIC_PARAM_POINT_U12_U23_U31, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, GUI_ELECTRIC_PARAM_POINT_F, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, GUI_ELECTRIC_PARAM_POINT_I1_I2_I3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, GUI_ELECTRIC_PARAM_POINT_P1_P2_P3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, GUI_ELECTRIC_PARAM_POINT_S1_S2_S3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_P_Q_S, GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_PF, GUI_ELECTRIC_PARAM_POINT_P_Q_S, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_DI1_DI2, GUI_ELECTRIC_PARAM_POINT_PF, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_DO1_DO2, GUI_ELECTRIC_PARAM_POINT_DI1_DI2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_CURRENT, GUI_ELECTRIC_PARAM_POINT_DO1_DO2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_T1_T2, GUI_ELECTRIC_PARAM_POINT_CURRENT, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    {GUI_ELECTRIC_PARAM_POINT_T3_T4, GUI_ELECTRIC_PARAM_POINT_T1_T2, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_electric_param_gui},
+    
+    //报警信息
+    {GUI_ALARM_INFO, GUI_ALARM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_alarm_info},
+    //网关信息
+    {GUI_COM_INFO, GUI_COM_INFO, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_com_info},
+    //模组设置
+    {GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, GUI_MODULE_CONFIG_POINT_TEMP_THUP, GUI_OUTPUT_CONTROL_POINT_NORMAL, module_oled_display_module_config_gui},
+    {GUI_MODULE_CONFIG_POINT_CURRENT_THUP, GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, GUI_CONFIG_CURRENT_THUP, module_oled_display_module_config_gui},
+    {GUI_MODULE_CONFIG_POINT_TEMP_THUP, GUI_MODULE_CONFIG_POINT_CURRENT_THUP, GUI_CONFIG_TEMP_THUP, module_oled_display_module_config_gui},
+    //输出控制
+    {GUI_OUTPUT_CONTROL_POINT_NORMAL, GUI_OUTPUT_CONTROL_POINT_CANCEL, GUI_START, module_oled_display_output_control_gui},
+    {GUI_OUTPUT_CONTROL_POINT_ALARM, GUI_OUTPUT_CONTROL_POINT_NORMAL, GUI_START, module_oled_display_output_control_gui},
+    {GUI_OUTPUT_CONTROL_POINT_CANCEL, GUI_OUTPUT_CONTROL_POINT_ALARM, GUI_START, module_oled_display_output_control_gui},
+    //电流上限
+    {GUI_CONFIG_CURRENT_THUP, GUI_CONFIG_CURRENT_THUP, GUI_START, module_oled_display_config_current_thup_gui},
+    //温度上限
+    {GUI_CONFIG_TEMP_THUP, GUI_CONFIG_TEMP_THUP, GUI_START, module_oled_display_config_temp_thup_gui},
+    
+    //电能查询
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_POINT_EPI, module_oled_display_energy_param_lookup_gui_l},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_POINT_EPE, module_oled_display_energy_param_lookup_gui_l},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EP, GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_POINT_EP, module_oled_display_energy_param_lookup_gui_l},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQL, module_oled_display_energy_param_lookup_gui_l},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQC, module_oled_display_energy_param_lookup_gui_l},
+    {GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQ, module_oled_display_energy_param_lookup_gui_l},
+
+    //电能参数
+    {GUI_ENERGY_PARAM_POINT_EPI, GUI_ENERGY_PARAM_POINT_EQ, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EPE, GUI_ENERGY_PARAM_POINT_EPI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EP, GUI_ENERGY_PARAM_POINT_EPE, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQL, GUI_ENERGY_PARAM_POINT_EP, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQC, GUI_ENERGY_PARAM_POINT_EQL, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    {GUI_ENERGY_PARAM_POINT_EQ, GUI_ENERGY_PARAM_POINT_EQC, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_energy_param_gui},
+    
+#if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB
+    //相位查询
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_AgU, module_oled_display_harmonic_param_lookup_gui_l},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_AgI, module_oled_display_harmonic_param_lookup_gui_l},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_DvU, module_oled_display_harmonic_param_lookup_gui_l},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_POINT_DvUL, module_oled_display_harmonic_param_lookup_gui_l},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_POINT_DvF, module_oled_display_harmonic_param_lookup_gui_l},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, GUI_HARMONIC_PARAM_POINT_ImbU, module_oled_display_harmonic_param_lookup_gui_l},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_ImbI, module_oled_display_harmonic_param_lookup_gui_l},
+#if PROD_TYPE == PROD_SFE    
+    //谐波查询   
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_U, GUI_HARMONIC_PARAM_LOOKUP_POINT_I, GUI_HARMONIC_PARAM_POINT_U, module_oled_display_harmonicUI_param_lookup_gui},
+    {GUI_HARMONIC_PARAM_LOOKUP_POINT_I, GUI_HARMONIC_PARAM_LOOKUP_POINT_U, GUI_HARMONIC_PARAM_POINT_I, module_oled_display_harmonicUI_param_lookup_gui},
+#endif    
+    //相位参数
+    {GUI_HARMONIC_PARAM_POINT_AgU, GUI_HARMONIC_PARAM_POINT_ImbI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_AgI, GUI_HARMONIC_PARAM_POINT_AgU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvU, GUI_HARMONIC_PARAM_POINT_AgI, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvUL, GUI_HARMONIC_PARAM_POINT_DvU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_DvF, GUI_HARMONIC_PARAM_POINT_DvUL, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_ImbU, GUI_HARMONIC_PARAM_POINT_DvF, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_ImbI, GUI_HARMONIC_PARAM_POINT_ImbU, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonic_param_gui},
+#if PROD_TYPE == PROD_SFE    
+    //谐波参数
+    {GUI_HARMONIC_PARAM_POINT_U, GUI_HARMONIC_PARAM_POINT_I, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonicUI_param_gui},
+    {GUI_HARMONIC_PARAM_POINT_I, GUI_HARMONIC_PARAM_POINT_U, GUI_MAIN_MENU_POINT_LOOP_PARAM, module_oled_display_harmonicUI_param_gui},
+#endif
+#endif
+};
+
+
+/* Private function prototypes -----------------------------------------------*/
+void KeyOledTask(void *argument);
+
+void module_oled_display_title(uint8_t title, uint8_t colour);
+void module_oled_save_param_in_enter(uint8_t page_index);
+
+/* Private user code ---------------------------------------------------------*/
+
+
+/**
+  * @brief  数据修改
+  * @param  data 数据
+  * @param  sign 有无符号位
+  * @param  set_bit 选择位
+  * @retval None
+  */
+void oled_set_data_bit_loop_add_one(uint32_t *data, uint8_t sign, uint8_t all_bit, uint8_t set_bit)
+{
+    uint8_t i;
+    uint32_t add_val;
+    uint32_t temp;
+
+    if(sign && set_bit >= (all_bit - 1)) //改变正负
+    {
+        *data = -*data;
+    }
+    else
+    {
+        add_val = 1;
+        for(i = 0; i < set_bit; i++)
+        {
+            add_val *= 10;
+        }
+
+        if(sign && ((int32_t)(*data) < 0))  //取绝对值
+        {
+            temp = -((int32_t)(*data));
+        }
+        else
+        {
+            temp = *data;
+        }
+
+        i = temp / add_val % 10;
+        if(i == 9)
+        {
+            temp = temp - 9 * add_val;
+        }
+        else
+        {
+            temp = temp + add_val;
+        }
+
+        if(sign && (*((int32_t *)data) < 0)) //还原
+        {
+            *data = -temp;
+        }
+        else
+        {
+            *data = temp;
+        }
+    }
+}
+
+void oled_set_data_bit_loop_minus_one(uint32_t *data, uint8_t sign, uint8_t all_bit, uint8_t set_bit)
+{
+    uint8_t i;
+    uint32_t add_val;
+    uint32_t temp;
+
+    if(sign && set_bit >= (all_bit - 1)) //改变正负
+    {
+        *data = -*data;
+    }
+    else
+    {
+        add_val = 1;
+        for(i = 0; i < set_bit; i++)
+        {
+            add_val *= 10;
+            LOGW(TAG, "temp = %d",temp);
+        }
+
+        if(sign && ((int32_t)(*data) < 0))  //取绝对值
+        {
+            temp = -((int32_t)(*data));
+            LOGE(TAG, "temp = %d",temp);
+        }
+        else
+        {
+            temp = *data;
+            LOGI(TAG, "temp = %d",temp);
+        }
+
+        i = temp / add_val % 10;
+        if(i == 0)
+        {
+            temp = temp + 9 * add_val;
+            LOGD(TAG, "temp = %d",temp);
+        }
+        else
+        {
+            temp = temp - add_val;
+            LOGV(TAG, "temp = %d",temp);
+            LOGV(TAG, "add_val = %d",add_val);
+        }
+
+        if(sign && (*((int32_t *)data) < 0)) //还原
+        {
+            *data = -temp;
+        }
+        else
+        {
+            *data = temp;
+        }
+    }
+}
+/**
+  * @brief  数据内容显示
+  * @param  data 数据
+  * @param  sign 有无符号位
+  * @param  disp_all_bit 显示所有位数（不包括小数点，若有符号，则包括符号位）
+  * @param  disp_point_bit 显示小数点位数
+  * @param  set_bit 选择位（不包括小数点，若有符号，则包括符号位）
+  * @param  clear 清除使能
+  * @retval None
+  */
+void oled_display_config_data_content(uint32_t data, uint8_t sign, uint8_t disp_all_bit, uint16_t disp_point_bit, uint8_t disp_set_bit, uint8_t clear)
+{
+    uint32_t temp;
+    uint16_t bit;
+    uint8_t x, y, bit_val;
+    uint8_t str[5];
+
+    y = 2;
+    if(sign && ((int32_t)data < 0))
+    {
+        temp = -data;
+    }
+    else
+    {
+        temp = data;
+    }
+
+    x = 64;
+    for(bit = 0; bit < disp_all_bit; bit++)
+    {
+        if(bit == disp_point_bit && disp_point_bit != 0)
+        {
+            if(clear == OLED_DISPLAY_CLEAR)
+            {
+                OLED_ShowStr(x, y, (uint8_t *)".", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+            }
+            x -= 8;
+        }
+
+        if(clear == OLED_DISPLAY_CLEAR)
+        {
+            if(bit == disp_all_bit - 1 && sign) //有符号的最后一位
+            {
+                if((int32_t)data < 0)
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"-", OLED_CHAR_EN_SIZE_8x16, OLED_DISPLAY_POS_BIT_COLOUR(bit, disp_set_bit));
+                }
+                else
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"+", OLED_CHAR_EN_SIZE_8x16, OLED_DISPLAY_POS_BIT_COLOUR(bit, disp_set_bit));
+                }
+            }
+            else
+            {
+                bit_val = temp % 10;
+                sprintf((char *)str, "%u", bit_val);
+                OLED_ShowStr(x, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_DISPLAY_POS_BIT_COLOUR(bit, disp_set_bit));
+            }
+        }
+        else if(bit == disp_set_bit) //只显示选中的数字
+        {
+            if(bit == disp_all_bit - 1 && sign)
+            {
+                if((int32_t)data < 0)
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"-", OLED_CHAR_EN_SIZE_8x16, OLED_DISPLAY_POS_BIT_COLOUR(bit, disp_set_bit));
+                }
+                else
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"+", OLED_CHAR_EN_SIZE_8x16, OLED_DISPLAY_POS_BIT_COLOUR(bit, disp_set_bit));
+                }
+            }
+            else
+            {
+                bit_val = temp % 10;
+                sprintf((char *)str, "%u", bit_val);
+                OLED_ShowStr(x, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_DISPLAY_POS_BIT_COLOUR(bit, disp_set_bit));
+            }
+        }
+
+        x -= 8;
+        temp /= 10;
+    }
+}
+
+/**
+  * @brief  显示标题内容
+  * @param  title 显示标题
+  * @param  colour 颜色
+  * @retval None
+  */
+void oled_display_title_content(uint8_t title, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    index = 0;
+    y = 0;
+    OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+    switch(title)
+    {
+    case GUI_TITLE_MAIN_MENU:
+        x = 40;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_cai, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dan, colour);
+        break;
+
+    case GUI_TITLE_LOOKUP_PARAM:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_cha, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xun, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_can, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        break;
+
+    case GUI_TITLE_ELECTRIC_PARAM:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_qi, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_can, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        break;
+
+    case GUI_TITLE_COMMON_CONFIG:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_tong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_yong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_she, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi1, colour);
+        break;
+
+    case GUI_TITLE_MODULE_CONFIG:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_mo, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_she, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi1, colour);
+        break;
+
+    case GUI_TITLE_ALARM_INFO:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xin, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xi, colour);
+        break;
+    
+    case GUI_TITLE_COM_INFO:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wang, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_guan, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xin, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xi, colour);
+        break;
+
+    case GUI_TITLE_COMMON_CONFIG_MODBUS_ADDR:
+        x = 24;
+        OLED_ShowStr(x, y, (uint8_t *)"Modbus", OLED_CHAR_EN_SIZE_8x16, colour);
+        x += 48;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_di, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi, colour);
+        break;
+
+    case GUI_TITLE_COMMON_CONFIG_SERIAL_NUMBER:
+        x = 40;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lie, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_hao, colour);
+        break;
+
+    case GUI_TITLE_COMMON_CONFIG_FMW_VERSION:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jian1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ban, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ben, colour);
+        break;
+
+    case GUI_TITLE_COMMON_CONFIG_FACTORY_RESET:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shi2, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_fou, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_hui, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_fu, colour);
+        break;
+    
+    default:
+        module_oled_display_title(title, colour);
+        break;
+    }
+
+}
+
+/**
+  * @brief  显示标题
+  * @param  title 显示标题
+  *            @arg GUI_TITLE_MAIN_MENU: 主菜单
+  *            @arg GUI_TITLE_LOOKUP_PARAM: 查询参数
+  *            @arg GUI_TITLE_ELECTRIC_PARAM: 电气参数
+  *            @arg GUI_TITLE_COMMON_CONFIG: 通用设置
+  *            @arg GUI_TITLE_MODULE_CONFIG: 模组设置
+  *            @arg GUI_TITLE_ALARM_INFO: 报警信息
+  *            @arg GUI_TITLE_COMMON_CONFIG_MODBUS_ADDR: Modbus地址
+  * @param  part 显示箭头
+  *            @arg GUI_TITLE_HAVE_NONE:         XXX
+  *            @arg GUI_TITLE_HAVE_LEFT:       < XXX
+  *            @arg GUI_TITLE_HAVE_RIGHT:        XXX >
+  *            @arg GUI_TITLE_HAVE_LEFT_RIGHT: < XXX >
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @param  colour 颜色
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  * @retval None
+  */
+void oled_display_title(uint8_t title, uint8_t part, uint8_t clear, uint8_t colour)
+{
+    uint8_t x1, x2, y;
+
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        oled_display_title_content(title, colour);
+    }
+
+    x1 = 1;
+    x2 = 16 * 7 - 1;
+    y = 0;
+    OLED_ShowCN(x1, y, OLED_CHAR_zuojiantou0, colour);
+    OLED_ShowCN(x2, y, OLED_CHAR_youjiantou0, colour);
+
+    if(part & GUI_TITLE_HAVE_LEFT)
+    {
+        OLED_ShowCN(x1, y, OLED_CHAR_zuojiantou, colour);
+    }
+
+    if(part & GUI_TITLE_HAVE_RIGHT)
+    {
+        OLED_ShowCN(x2, y, OLED_CHAR_youjiantou, colour);
+    }
+}
+
+/**
+  * @brief  通用设置显示部分内容
+  * @param  part 显示部分
+  *            @arg GUI_COMMON_CONFIG_POINT_MODBUS_ADDR: 1.Modbus地址
+  * @param  colour 显示颜色
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  * @retval None
+  */
+void oled_display_common_config_gui_part(uint8_t part, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    switch(part)
+    {
+    case GUI_COMMON_CONFIG_POINT_MODBUS_ADDR:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"1. Modbus", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 72;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_di, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi, colour);
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"2. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lie, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_hao, colour);
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_FMW_VERSION:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"3. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jian1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ban, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ben, colour);
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_FACTORY_RESET:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"4. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_hui, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_fu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chang1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_she, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi1, colour);
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_RESET:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"5. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_qi2, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_she, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bei, colour);
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  通用设置
+            ————————————————————————
+            |       通用设置       |
+            | 1.Modbus地址         |
+            | 2.序列号             |
+            | 3.固件版本           |
+            ————————————————————————
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void oled_display_common_config_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_COMMON_CONFIG_POINT_MODBUS_ADDR:
+    case GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER:
+        oled_display_common_config_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_FMW_VERSION: //第1页最后一行
+        oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FACTORY_RESET, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_RESET, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_FACTORY_RESET:
+        oled_display_common_config_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_RESET: //第2页最后一行
+        oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FMW_VERSION, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        if(page_index >= GUI_COMMON_CONFIG_POINT_MODBUS_ADDR && page_index <= GUI_COMMON_CONFIG_POINT_FMW_VERSION)
+        {
+            oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FMW_VERSION, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_COMMON_CONFIG_POINT_FACTORY_RESET && page_index <= GUI_COMMON_CONFIG_POINT_RESET)
+        {
+            oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FACTORY_RESET, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_RESET, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_common_config_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_common_config_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER:
+    case GUI_COMMON_CONFIG_POINT_FMW_VERSION:
+        oled_display_common_config_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_MODBUS_ADDR: //GUI_COMMON_CONFIG_POINT_FMW_VERSION: //第1页最后一行
+        oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FACTORY_RESET, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_RESET, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_RESET:
+        oled_display_common_config_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_FACTORY_RESET: //第2页最后一行
+        oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FMW_VERSION, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        if(page_index >= GUI_COMMON_CONFIG_POINT_MODBUS_ADDR && page_index <= GUI_COMMON_CONFIG_POINT_FMW_VERSION)
+        {
+            oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FMW_VERSION, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_COMMON_CONFIG_POINT_FACTORY_RESET && page_index <= GUI_COMMON_CONFIG_POINT_RESET)
+        {
+            oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FACTORY_RESET, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_RESET, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_common_config_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_common_config_gui_r(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_COMMON_CONFIG_POINT_MODBUS_ADDR:
+    case GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER:
+    case GUI_COMMON_CONFIG_POINT_FMW_VERSION: //第1页最后一行
+        oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FACTORY_RESET, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_RESET, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_FACTORY_RESET:
+    case GUI_COMMON_CONFIG_POINT_RESET: //第2页最后一行
+        oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FMW_VERSION, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        if(page_index >= GUI_COMMON_CONFIG_POINT_MODBUS_ADDR && page_index <= GUI_COMMON_CONFIG_POINT_FMW_VERSION)
+        {
+            oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FMW_VERSION, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_COMMON_CONFIG_POINT_FACTORY_RESET && page_index <= GUI_COMMON_CONFIG_POINT_RESET)
+        {
+            oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FACTORY_RESET, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_RESET, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_common_config_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_common_config_gui_l(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_COMMON_CONFIG_POINT_MODBUS_ADDR:
+    case GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER:
+    case GUI_COMMON_CONFIG_POINT_FMW_VERSION: //第1页最后一行
+        oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FACTORY_RESET, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_RESET, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_COMMON_CONFIG_POINT_FACTORY_RESET:
+    case GUI_COMMON_CONFIG_POINT_RESET: //第2页最后一行
+        oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, OLED_WHITE_ON_BLACK);
+        oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FMW_VERSION, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        if(page_index >= GUI_COMMON_CONFIG_POINT_MODBUS_ADDR && page_index <= GUI_COMMON_CONFIG_POINT_FMW_VERSION)
+        {
+            oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_MODBUS_ADDR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_SERIAL_NUMBER, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FMW_VERSION, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_COMMON_CONFIG_POINT_FACTORY_RESET && page_index <= GUI_COMMON_CONFIG_POINT_RESET)
+        {
+            oled_display_title(GUI_TITLE_COMMON_CONFIG, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_FACTORY_RESET, OLED_WHITE_ON_BLACK);
+            oled_display_common_config_gui_part(GUI_COMMON_CONFIG_POINT_RESET, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_common_config_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  Modbus地址
+            ————————————————————————
+            |      Modbus地址      |
+            |             255      |
+            |                      |
+            |                      |
+            ————————————————————————
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void oled_display_config_modbus_addr_gui(uint8_t page_index, uint8_t key_val)
+{
+    static uint8_t set_bit = 0;
+    uint8_t sign, all_bit, point_bit;
+
+    sign = 0;
+    all_bit = 3;
+    point_bit = 0;
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_CONFIG_MODBUS_ADDR:
+        if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 5)
+        {
+            btnow = 0;
+            oled_set_data_bit_loop_add_one(&gTemp_config_param, sign, all_bit, set_bit);
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_KEEP);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 1)
+        {
+            btnow = 0;
+            oled_set_data_bit_loop_minus_one(&gTemp_config_param, sign, all_bit, set_bit);
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_KEEP);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 2)
+        {
+            btnow = 0;
+            set_bit = set_bit + 1 >= all_bit ? 0 : set_bit + 1;
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 4)
+        {
+            btnow = 0;
+            set_bit = set_bit - 1 < 0 ? 2 : set_bit - 1;
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        }
+        break;
+
+    default:
+//        if(addr_set == KEY_MODE_SETMODE || addr_set == KEY_MODE_SETADDRING)
+//        {
+//            gTemp_config_param = addr_num;
+//        }
+//        else 
+//        {
+            gTemp_config_param = (uint8_t)gFlashParam.st.idNum;
+//        }
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        oled_display_title(GUI_TITLE_COMMON_CONFIG_MODBUS_ADDR, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+        oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        break;
+    }
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  序列号
+            ————————————————————————
+            |        序列号        |
+            |   KSDE1E2220501001   |
+            |                      |
+            |                      |
+            ————————————————————————
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void oled_display_config_serial_number_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t str[17];
+
+    OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+    oled_display_title(GUI_TITLE_COMMON_CONFIG_SERIAL_NUMBER, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_BLACK_ON_WHITE);
+    memcpy(str, gFlashParam.st.idInfo, 16);
+    str[16] = '\0';
+    OLED_ShowStr(0, 2, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  固件版本
+            ————————————————————————
+            |       固件版本       |
+            |   FLK-1.2.0818.01    |
+            |                      |
+            |                      |
+            ————————————————————————
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void oled_display_config_fmw_version_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t x;
+
+    OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+    oled_display_title(GUI_TITLE_COMMON_CONFIG_SERIAL_NUMBER, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_BLACK_ON_WHITE);
+    x = 0;
+    OLED_ShowStr(x, 2, (uint8_t *)"FLK-", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    x += 32;
+    OLED_ShowStr(x, 2, (uint8_t *)SW_VERSION, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  显示部分内容
+  * @param  part 显示部分
+  * @param  colour 显示颜色
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  * @retval None
+  */
+void oled_display_config_factory_reset_gui_part(uint8_t part, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    switch(part)
+    {
+    case GUI_CONFIG_FACTORY_RESET_POINT_NO:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_fou, colour);
+        break;
+
+    case GUI_CONFIG_FACTORY_RESET_POINT_YES:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shi2, colour);
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  恢复出厂设置
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void oled_display_config_factory_reset_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_CONFIG_FACTORY_RESET_POINT_NO:
+    case GUI_CONFIG_FACTORY_RESET_POINT_YES:
+        oled_display_config_factory_reset_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    default:
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        oled_display_title(GUI_TITLE_COMMON_CONFIG_FACTORY_RESET, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+        oled_display_config_factory_reset_gui_part(GUI_CONFIG_FACTORY_RESET_POINT_NO, OLED_WHITE_ON_BLACK);
+        oled_display_config_factory_reset_gui_part(GUI_CONFIG_FACTORY_RESET_POINT_YES, OLED_WHITE_ON_BLACK);
+        break;
+    }
+
+    oled_display_config_factory_reset_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  OLED显示温度
+            |温度t_No[0]: t[0]℃  |
+  * @param  y 显示在第几行
+  * @param  t_No 温度序号
+  * @param  t 温度值（℃）
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_temperature(uint8_t y, uint8_t t_No, int16_t t, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1, index;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Val_To_String(0, t_No, str);
+    x1 = str_len * 8 + 48; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 0;
+        index = 0;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wen, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_du, OLED_WHITE_ON_BLACK);
+        x = 32;
+        str[str_len++] = ':';
+        str[str_len++] = '\0';
+        OLED_ShowStr(x, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 111; // (128-1)-(8*2) = 111
+        OLED_ShowCN(x, y, OLED_CHAR_sheshidu, OLED_WHITE_ON_BLACK); //℃
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 111, y, y + 2); //清除数字部分
+    }
+    str_len = 0;
+    if(t == PARAM_SIGNED_DISCONNECT_VALUE) //没有连接温度传感器
+    {
+        index = 0;
+        OLED_ShowCN(x1 + (16 * index++), y, OLED_CHAR_wei, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x1 + (16 * index++), y, OLED_CHAR_lian, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x1 + (16 * index++), y, OLED_CHAR_jie, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        str_len += ValDivideBy10_To_String(1, t, str); //有符号除十值
+        str[str_len++] = '\0';
+        OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+    }
+}
+
+/**
+  * @brief  相数显示成abc
+  * @param  No 相数
+  * @param  str 转换出的字符串
+  * @retval 字符串长度
+  */
+uint8_t Number_to_char(uint8_t No, uint8_t *str)
+{
+    switch(No)
+    {
+    case 1:
+        strcpy((char *)str, "A");
+        break;
+
+    case 2:
+        strcpy((char *)str, "B");
+        break;
+
+    case 3:
+        strcpy((char *)str, "C");
+        break;
+
+    case 12:
+        strcpy((char *)str, "AB");
+        break;
+
+    case 23:
+        strcpy((char *)str, "BC");
+        break;
+
+    case 31:
+        strcpy((char *)str, "CA");
+        break;
+    
+    case 55:
+        strcpy((char *)str, "PE");
+        break;
+    
+    case 7:
+        strcpy((char *)str, "RES");
+        break;
+
+    default:
+        strcpy((char *)str, "A");
+        break;
+    }
+
+    return strlen((char *)str);
+}
+
+/**
+  * @brief  OLED显示漏电
+            |漏电Ic_No[0]: Ic[0]mA |
+  * @param  y 显示在第几行
+  * @param  Ic_No 漏流序号
+  * @param  Ic 漏流值（mA）
+  * @param  unit 显示单位
+  *            @arg OLED_DISPLAY_UNIT_A: 安（A）
+  *            @arg OLED_DISPLAY_UNIT_mA: 毫安（mA）
+  *            @arg OLED_DISPLAY_UNIT_uA: 微安（uA）
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_leakage_current(uint8_t y, uint8_t I_No, float I, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(I_No, str);
+    x1 = str_len * 8 + 24; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 0;
+        OLED_ShowStr(x, y, (uint8_t *)"I", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x += 8;
+        OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        x += (str_len * 8);
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 111; // (128-1)-(8*2) = 111
+        OLED_ShowStr(x, y, (uint8_t *)"mA", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 111, y, y + 2);
+    }
+    str_len = 0;
+    if(I > 100000)
+    {
+        str_len += sprintf((char *)str, "%.0f", I);
+    }
+    else if(I > 10000)
+    {
+        str_len += sprintf((char *)str, "%.1f", I);
+    }
+    else if(I > 1000)
+    {
+        str_len += sprintf((char *)str, "%.2f", I);
+    }
+    else
+    {
+        str_len += sprintf((char *)str, "%.3f", I);
+    }
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  OLED显示电压
+            |电压U_No[0]: U[0]V |
+  * @param  y 显示在第几行
+  * @param  U_No 电压序号
+  * @param  U 电压值（V）
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_voltage(uint8_t y, uint8_t U_No, uint16_t U, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1, index;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Val_To_String(0, U_No, str);
+    x1 = str_len * 8 + 48; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 0;
+        index = 0;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, OLED_WHITE_ON_BLACK);
+        x = 32;
+        str[str_len++] = ':';
+        str[str_len++] = '\0';
+        OLED_ShowStr(x, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 119; // (128-1)-(8*2) = 111
+        OLED_ShowStr(x, y, (uint8_t *)"V", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 111, y, y + 2);
+    }
+    str_len = 0;
+    str_len += ValDivideBy10_To_String(0, U, str); //无符号除十值
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+
+/**
+  * @brief  OLED显示电压
+            |UA: U[0]V  |
+  * @param  y 显示在第几行
+  * @param  U_No 相
+  * @param  U 电压值（V）
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_L_voltage(uint8_t y, uint8_t U_No, float U, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(U_No, str);
+    x1 = str_len * 8 + 24; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 0;
+        OLED_ShowStr(x, y, (uint8_t *)"U", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x += 8;
+        OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        x += (str_len * 8);
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 119; // (128-1)-(8*2) = 111
+        OLED_ShowStr(x, y, (uint8_t *)"V", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 111, y, y + 2);
+    }
+    str_len = 0;
+    str_len += sprintf((char *)str, "%.1f", U);
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+/**
+  * @brief  OLED显示零地电压
+  * @param  y 显示在第几行
+  * @param  U_No 相
+  * @param  U 电压值（V）
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_N_voltage(uint8_t y, uint8_t U_No, float U, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(U_No, str);
+    x1 = str_len * 8 + 24; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 0;
+        OLED_ShowStr(x, y, (uint8_t *)"N", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x += 8;
+        OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        x += (str_len * 8);
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 119; // (128-1)-(8*2) = 111
+        OLED_ShowStr(x, y, (uint8_t *)"V", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 111, y, y + 2);
+    }
+    str_len = 0;
+    str_len += sprintf((char *)str, "%.1f", U);
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+/**
+  * @brief  OLED显示电流
+            |IL1: I[0]A |
+  * @param  y 显示在第几行
+  * @param  I_No 相
+  * @param  I 电流值（A）
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_L_current(uint8_t y, uint8_t I_No, float I, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(I_No, str);
+    x1 = str_len * 8 + 24; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 0;
+        OLED_ShowStr(x, y, (uint8_t *)"I", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x += 8;
+        OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        x += (str_len * 8);
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 119; // (128-1)-(8*2) = 111
+        OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 111, y, y + 2);
+    }
+    str_len = 0;
+    if(I > 100000)
+    {
+        str_len += sprintf((char *)str, "%.0f", I);
+    }
+    else if(I > 10000)
+    {
+        str_len += sprintf((char *)str, "%.1f", I);
+    }
+    else if(I > 1000)
+    {
+        str_len += sprintf((char *)str, "%.2f", I);
+    }
+    else
+    {
+        str_len += sprintf((char *)str, "%.3f", I);
+    }
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  OLED显示频率
+            |F: F[0]Hz |
+  * @param  y 显示在第几行
+  * @param  F 频率
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_L_frequency(uint8_t y, float F, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    x1 = 24; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 0;
+        OLED_ShowStr(x, y, (uint8_t *)"F: ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 112; // (128-1)-(8*2) = 111
+        OLED_ShowStr(x, y, (uint8_t *)"Hz", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 111, y, y + 2);
+    }
+    str_len = 0;
+    str_len += sprintf((char *)str, "%.2f", F);
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  OLED显示功率
+            |PL1: P[0]W |
+            |QL1: Q[0]W |
+            |ΣS: S[0]W  |
+  * @param  y 显示在第几行
+  * @param  P_No A/B/C/T
+  * @param  P 功率值
+  * @param  P_Type 功率类型
+  *            @arg 1: 有功功率P
+  *            @arg 2：无功功率Q
+  *            @arg 3：视在功率S
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_L_power(uint8_t y, uint8_t P_No, float P, uint8_t P_type, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(P_No, str);
+    x1 = str_len * 8 + 24; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 8;
+        if(P_No == 4)
+        {
+            OLED_DrawBMP(x, y + 1, x + 8, y + 2, BMP_8x8_Sigma);
+        }
+        else
+        {
+            OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        x += str_len * 8;
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 0;
+        if(P_type == 1)
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"P", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+            x = 111;
+            OLED_ShowStr(x, y, (uint8_t *)"W", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        else if(P_type == 2)
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"Q", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+            x = 95;
+            OLED_ShowStr(x, y, (uint8_t *)"var", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        else if(P_type == 3)
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"S", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+            x = 103;
+            OLED_ShowStr(x, y, (uint8_t *)"VA", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+    }
+    else
+    {
+        if(P_type == 1)
+        {
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 111, y, y + 2);
+        }
+        else if(P_type == 2)
+        {
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 95, y, y + 2);
+        }
+        else if(P_type == 3)
+        {
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 103, y, y + 2);
+        }
+    }
+    str_len = 0;
+    if(P > 10000)
+    {
+        str_len += sprintf((char *)str, "%.0f", P);
+    }
+    else if(P > 1000)
+    {
+        str_len += sprintf((char *)str, "%.1f", P);
+    }
+    else if(P > 100)
+    {
+        str_len += sprintf((char *)str, "%.2f", P);
+    }
+    else
+    {
+        str_len += sprintf((char *)str, "%.3f", P);
+    }
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  OLED显示功率因数
+            |PL1: P[0]W |
+            |QL1: Q[0]W |
+            |ΣS: S[0]W  |
+  * @param  y 显示在第几行
+  * @param  PF_No 相
+  *            @arg 0: 总
+  *            @arg 1：L1.......
+  * @param  PF 功率因数值
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_L_power_factor(uint8_t y, uint8_t PF_No, float PF, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(PF_No, str);
+    x1 = str_len * 8 + 32; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 16;
+        if(PF_No == 4)
+        {
+            OLED_DrawBMP(x, y + 1, x + 8, y + 2, BMP_8x8_Sigma);
+        }
+        else
+        {
+            OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        x += str_len * 8;
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 0;
+        OLED_ShowStr(x, y, (uint8_t *)"PF", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 128, y, y + 2);
+    }
+    str_len = 0;
+    str_len += sprintf((char *)str, "%.3f", PF);
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  OLED显示输入输出
+            |输入1: 报警 |
+            |输出1: 正常 |
+  * @param  y 显示在第几行
+  * @param  DIO_No 序号
+  *            @arg 0: 不显示
+  *            @arg 1：1.....
+  * @param  DIO 输入输出报警状态
+  * @param  DIO_type 输入输出类型
+  *            @arg 1: 输入
+  *            @arg 2：输出
+  * @param  clear 清除使能
+  *            @arg OLED_DISPLAY_KEEP: 保持（不清除）
+  *            @arg OLED_DISPLAY_CLEAR: 清除
+  * @retval None
+  */
+void oled_display_DO_Status(uint8_t y, uint8_t DIO_No, uint16_t DIO, uint8_t DIO_type, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1, index;
+    uint8_t str[10];
+
+    str_len = 0;
+    if(DIO_No == 0) //不显示序号123
+    {
+        x1 = 48;
+    }
+    else
+    {
+        str_len += Val_To_String(0, DIO_No, str);
+        x1 = str_len * 8 + 48; //获取数据起始位置x1
+    }
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 0;
+        index = 0;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu1, OLED_WHITE_ON_BLACK);
+        if(DIO_type == 1)
+        {
+            OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ru, OLED_WHITE_ON_BLACK);
+        }
+        else
+        {
+            OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chu, OLED_WHITE_ON_BLACK);
+        }
+        if(DIO_No == 0)
+        {
+            x = 32;
+        }
+        else
+        {
+            x = 32;
+            OLED_ShowStr(x, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+            x += str_len * 8;
+        }
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 128, y, y + 2);
+    }
+    index = 0;
+    if(DIO)
+    {
+        OLED_ShowCN(x1 + (16 * index++), y, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x1 + (16 * index++), y, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_ShowCN(x1 + (16 * index++), y, OLED_CHAR_zheng, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x1 + (16 * index++), y, OLED_CHAR_chang, OLED_WHITE_ON_BLACK);
+    }
+}
+
+void oled_display_DI_Status(uint8_t y, uint8_t DIO_No, uint16_t DIO, uint8_t DIO_type, uint8_t clear)
+{
+    uint8_t x, index;
+
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        x = 0;
+        index = 0;
+        OLED_ShowCN(x + (16 * index++), 2, OLED_CHAR_si, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), 2, OLED_CHAR_lu, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), 2, OLED_CHAR_shu1, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), 2, OLED_CHAR_ru, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), 2, OLED_CHAR_zhuang, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), 2, OLED_CHAR_tai, OLED_WHITE_ON_BLACK);
+        OLED_ShowStr(x + (16 * index++), 2, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        
+        OLED_ShowStr(0, 4, (uint8_t *)"In1", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        OLED_ShowStr(24, 4, (uint8_t *)":", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        OLED_ShowStr(64, 4, (uint8_t *)"In2", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        OLED_ShowStr(88, 4, (uint8_t *)":", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        OLED_ShowStr(0, 6, (uint8_t *)"In3", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        OLED_ShowStr(24, 6, (uint8_t *)":", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        OLED_ShowStr(64, 6, (uint8_t *)"In4", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        OLED_ShowStr(88, 6, (uint8_t *)":", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 32, 64, y, y + 2);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 96, 128, y, y + 2);
+    }
+    
+    if(gESE_Elem.st.DI[0])
+    {
+        OLED_ShowCN(32, 4, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(48, 4, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_ShowCN(32, 4, OLED_CHAR_zheng, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(48, 4, OLED_CHAR_chang, OLED_WHITE_ON_BLACK);
+    }
+    if(gESE_Elem.st.DI[1])
+    {
+        OLED_ShowCN(96, 4, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(112, 4, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_ShowCN(96, 4, OLED_CHAR_zheng, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(112, 4, OLED_CHAR_chang, OLED_WHITE_ON_BLACK);
+    }
+    if(gESE_Elem.st.DI[2])
+    {
+        OLED_ShowCN(32, 6, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(48, 6, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_ShowCN(32, 6, OLED_CHAR_zheng, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(48, 6, OLED_CHAR_chang, OLED_WHITE_ON_BLACK);
+    }
+    if(gESE_Elem.st.DI[3])
+    {
+        OLED_ShowCN(96, 6, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(112, 6, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_ShowCN(96, 6, OLED_CHAR_zheng, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(112, 6, OLED_CHAR_chang, OLED_WHITE_ON_BLACK);
+    }
+}
+
+/**
+  * @brief  OLED显示电能
+  * @param  y 显示在第几行
+  * @param  E_No A/B/C/Σ
+  * @param  E 值
+  * @param  E_Type 类型
+  * @param  clear 清除使能
+  * @retval None
+  */
+void oled_display_L_energy(uint8_t y, uint8_t E_No, float E, uint8_t E_type, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(E_No, str);
+    x1 = str_len * 8 + 24; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 16;
+        if(E_No == 4)
+        {
+            OLED_DrawBMP(x, y + 1, x + 8, y + 2, BMP_8x8_Sigma);
+        }
+        else
+        {
+            OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        x += str_len * 8;
+        OLED_ShowStr(x, y, (uint8_t *)":", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 0;
+        OLED_ShowStr(x, y, (uint8_t *)"E", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x += 8;
+        if(E_type & 0x01)
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"Q", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+            x = 88 - 1;
+            OLED_ShowStr(x, y, (uint8_t *)"kvarh", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        else
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"P", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+            x = 104 - 1;
+            OLED_ShowStr(x, y, (uint8_t *)"kWh", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        x = 16;
+        if(E_type & 0x02)
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"-", OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        else
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"+", OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+    }
+    else
+    {
+        if(E_type & 0x01)
+        {
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 87, y, y + 2);
+        }
+        else
+        {
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 103, y, y + 2);
+        }
+    }
+    str_len = 0;
+    if(E >= 10000)
+    {
+        str_len += sprintf((char *)str, "%.0f", E);
+    }
+    else if(E >= 1000)
+    {
+        str_len += sprintf((char *)str, "%.1f", E);
+    }
+    else if(E >= 100)
+    {
+        str_len += sprintf((char *)str, "%.2f", E);
+    }
+    else
+    {
+        str_len += sprintf((char *)str, "%.3f", E);
+    }
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  OLED显示角度
+  * @param  y 显示在第几行
+  * @param  A_No A/B/C
+  * @param  A 值
+  * @param  A_Type 类型
+  * @param  clear 清除使能
+  * @retval None
+  */
+void oled_display_L_angle(uint8_t y, uint8_t A_No, float A, uint8_t A_type, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(A_No, str);
+    x1 = str_len * 8 + 32; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 16;
+        OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        x += str_len * 8;
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 0;
+        OLED_DrawBMP(x, y, x + 8, y + 2, BMP_8x16_Angle);
+        x += 8;
+        if(A_type)
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"I", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        else
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"U", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        x = 120 - 1;
+        OLED_DrawBMP(x, y, x + 8, y + 2, BMP_8x16_Degree);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 119, y, y + 2);
+    }
+    str_len = 0;
+    str_len += sprintf((char *)str, "%.1f", A);
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  OLED显示偏差
+  * @param  y 显示在第几行
+  * @param  D_No A/B/C/Σ
+  * @param  D 值
+  * @param  D_Type 类型
+  * @param  clear 清除使能
+  * @retval None
+  */
+void oled_display_L_deviation(uint8_t y, uint8_t D_No, float D, uint8_t D_type, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(D_No, str);
+    x1 = str_len * 8 + 32; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 16;
+        if(D_No)
+        {
+            OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        x += str_len * 8;
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 0;
+        OLED_DrawBMP(x, y, x + 8, y + 2, BMP_8x16_Delta);
+        x += 8;
+        if(D_type)
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"F", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        else
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"U", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        x = 120 - 1;
+        OLED_ShowStr(x, y, (uint8_t *)"%", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 119, y, y + 2);
+    }
+    str_len = 0;
+    str_len += sprintf((char *)str, "%.2f", D);
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  OLED显示不平衡度
+  * @param  y 显示在第几行
+  * @param  Imb_No A/B/C/Σ
+  * @param  Imb 值
+  * @param  Imb_Type 类型
+  * @param  clear 清除使能
+  * @retval None
+  */
+void oled_display_L_imbalance(uint8_t y, uint8_t Imb_No, float Imb, uint8_t Imb_type, uint8_t clear)
+{
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    x1 = 40; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 16;
+        if(Imb_No)
+        {
+            OLED_ShowStr(x, y + 1, (uint8_t *)"2", OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        else
+        {
+            OLED_ShowStr(x, y + 1, (uint8_t *)"0", OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        x += 8;
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 0;
+        OLED_DrawBMP(x, y, x + 8, y + 2, BMP_8x16_Epsilon);
+        x += 8;
+        if(Imb_type)
+        {
+            OLED_ShowStr(x, y + 1, (uint8_t *)"I", OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        else
+        {
+            OLED_ShowStr(x, y + 1, (uint8_t *)"U", OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        }
+        x = 120 - 1;
+        OLED_ShowStr(x, y, (uint8_t *)"%", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 119, y, y + 2);
+    }
+    str_len = 0;
+    str_len += sprintf((char *)str, "%.2f", Imb);
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  //8*16字符
+}
+
+/**
+  * @brief  OLED显示谐波畸变率
+  * @param  y 显示在第几行
+  * @param  H_No A/B/C/Σ
+  * @param  H 值
+  * @param  H_Type 类型
+  * @param  clear 清除使能
+  * @retval None
+  */
+void oled_display_L_harmonic(uint8_t y, uint8_t H_No, short H, uint8_t H_type, uint8_t clear)
+{
+    float ftemp;
+    uint16_t str_len;
+    uint8_t x, x1;
+    uint8_t str[10];
+
+    str_len = 0;
+    str_len += Number_to_char(H_No, str);
+    x1 = str_len * 8 + 48; //获取数据起始位置x1
+    if(clear == OLED_DISPLAY_CLEAR)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, y, y + 2); //清除该行
+        x = 32;
+        OLED_ShowStr(x, y + 1, str, OLED_CHAR_EN_SIZE_8x8, OLED_WHITE_ON_BLACK);
+        x += str_len * 8;
+        OLED_ShowStr(x, y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x = 0;
+        OLED_ShowStr(x, y, (uint8_t *)"THD", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        x += 24;
+        if(H_type)
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"I", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        else
+        {
+            OLED_ShowStr(x, y, (uint8_t *)"U", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        }
+        x = 120 - 1;
+        OLED_ShowStr(x, y, (uint8_t *)"%", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, x1, 119, y, y + 2);
+    }
+    str_len = 0;
+    ftemp = (float)H / 100.0;
+    str_len += sprintf((char *)str, "%.2f", ftemp);
+    str[str_len++] = '\0';
+    OLED_ShowStr(x1, y, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  开始界面显示的Modbus地址
+  * @param  None
+  * @retval None
+  */
+void oled_display_start_gui_part(void)
+{
+    uint8_t x, index;
+    uint8_t str[5];
+
+    x = 32;
+    OLED_ShowStr(x, 4, (uint8_t *)"(A - ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+    x += 5 * 8;
+    index = Val_To_String(0, (uint8_t)gFlashParam.st.idNum, str);
+    str[index++] = ')';
+    str[index++] = '\0';
+    OLED_ShowStr(x, 4, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);		//8*16字符
+}
+
+/**
+  * @brief  主菜单显示部分内容
+  * @param  part 显示部分
+  *            @arg GUI_MAIN_MENU_POINT_LOOP_PARAM: 轮询显示
+  *            @arg GUI_MAIN_MENU_POINT_LOOKUP_PARAM: 查询显示
+  *            @arg GUI_MAIN_MENU_POINT_COMMON_CONFIG: 通用设置
+  *            @arg GUI_MAIN_MENU_POINT_MODULE_CONFIG: 模组设置
+  *            @arg GUI_MAIN_MENU_POINT_ALARM_INFO: 报警信息
+  * @param  colour 显示颜色
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  * @retval None
+  */
+void oled_display_main_menu_gui_part(uint8_t part, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    switch(part)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM: //1.轮询显示
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"1. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lun, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xun, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shi, colour);
+        break;
+
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM: //2.查询显示
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"2. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_cha, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xun, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shi, colour);
+        break;
+
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //3.通用设置
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"3. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_tong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_yong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_she, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi1, colour);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG: //4.模组设置
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"4. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_mo, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_she, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi1, colour);
+        break;
+
+    case GUI_MAIN_MENU_POINT_ALARM_INFO: //5.报警信息
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"5. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xin, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xi, colour);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_COM_INFO: //6.网关信息
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"6. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wang, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_guan, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xin, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xi, colour);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM: //7.电能数据
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"7. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ju, colour);
+        break;
+
+#if PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFE        
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM: //8.相位数据
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"8. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wel, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ju, colour);
+        break;
+#if PROD_TYPE == PROD_SFE    
+    case GUI_MAIN_MENU_POINT_HARMONICUI_PARAM: //9.谐波数据
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"9. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xie, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bo, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ju, colour);
+        break;
+#endif
+#endif
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  主菜单
+            ————————————————————————
+            |        主菜单      > |
+            | 1.轮询显示           |
+            | 2.查询显示           |
+            | 3.通用设置           |
+            ————————————————————————
+            ————————————————————————
+            | <      主菜单        |
+            | 4.模组设置           |
+            | 5.报警信息           |
+            |                      |
+            ————————————————————————
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+#if PROD_TYPE == PROD_SFA
+void oled_display_main_menu_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_ENERGY_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_COM_INFO:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_ENERGY_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_r(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行GUI_TITLE_HAVE_LEFT
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_ENERGY_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_l(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_ENERGY_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+#endif
+
+#if PROD_TYPE == PROD_SFB
+void oled_display_main_menu_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+    
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM:        
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_HARMONIC_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_COM_INFO:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_HARMONIC_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_r(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行GUI_TITLE_HAVE_LEFT
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM:        
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_HARMONIC_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_l(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM:        
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_HARMONIC_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+#endif
+
+#if PROD_TYPE == PROD_SFE
+void oled_display_main_menu_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_HARMONICUI_PARAM:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_HARMONICUI_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_COM_INFO:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_HARMONICUI_PARAM:
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM:        
+        oled_display_main_menu_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_HARMONICUI_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_r(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行GUI_TITLE_HAVE_LEFT
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM:        
+    case GUI_MAIN_MENU_POINT_HARMONICUI_PARAM:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_HARMONICUI_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void oled_display_main_menu_gui_l(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MAIN_MENU_POINT_LOOP_PARAM:
+    case GUI_MAIN_MENU_POINT_LOOKUP_PARAM:
+    case GUI_MAIN_MENU_POINT_COMMON_CONFIG: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_MAIN_MENU_POINT_MODULE_CONFIG:
+    case GUI_MAIN_MENU_POINT_ALARM_INFO:        
+    case GUI_MAIN_MENU_POINT_COM_INFO:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_MAIN_MENU_POINT_ENERGY_PARAM:
+    case GUI_MAIN_MENU_POINT_HARMONIC_PARAM:        
+    case GUI_MAIN_MENU_POINT_HARMONICUI_PARAM:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+        oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_MAIN_MENU_POINT_LOOP_PARAM && page_index <= GUI_MAIN_MENU_POINT_COMMON_CONFIG)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_LOOKUP_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COMMON_CONFIG, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_MODULE_CONFIG && page_index <= GUI_MAIN_MENU_POINT_COM_INFO)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_MODULE_CONFIG, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ALARM_INFO, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_COM_INFO, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_MAIN_MENU_POINT_ENERGY_PARAM && page_index <= GUI_MAIN_MENU_POINT_HARMONICUI_PARAM)
+        {
+            oled_display_title(GUI_TITLE_MAIN_MENU, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_ENERGY_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONIC_PARAM, OLED_WHITE_ON_BLACK);
+            oled_display_main_menu_gui_part(GUI_MAIN_MENU_POINT_HARMONICUI_PARAM, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    oled_display_main_menu_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+#endif
+
+
+/**
+  * @brief  确认键后存储数据
+  * @param  page_index 页面索引
+  * @retval None
+  */
+void oled_save_param_in_enter(uint8_t page_index)
+{
+    switch(page_index)
+    {
+    case GUI_CONFIG_MODBUS_ADDR:
+        if(gTemp_config_param > 0xFF)
+        {
+            gFlashParam.st.idNum = 0xFF;
+        }
+        else if(gTemp_config_param == 0)
+        {
+            gFlashParam.st.idNum = 1;
+        }
+        else
+        {
+            gFlashParam.st.idNum &= 0xFFFFFF00;   //清除低8位
+            gFlashParam.st.idNum |= gTemp_config_param;
+        }
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+        break;
+
+#if PROD_TYPE == PROD_ESP         
+    case GUI_ALARM_INFO:
+        gFlashParam.st.fVol_PNUp = gTemp_config_param;
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+        break;
+#endif
+    
+    default:
+        module_oled_save_param_in_enter(page_index);
+        break;
+    }
+}
+
+#if PROD_TYPE == PROD_SFE || PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFA
+/**
+  * @brief  开始界面
+            ————————————————————————
+            |                      |
+            |   电气火灾监测模组   |
+            |        (A-255)       |
+            |                      |
+            ————————————————————————
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+#if PROD_TYPE == PROD_SFA
+void module_oled_display_start_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t x, y, index;
+
+    if(gOledRunInfo.last_index == GUI_CONFIG_FACTORY_RESET_POINT_YES)
+    {
+        gFlashParam.st.magicNum = 0;
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+        NVIC_SystemReset();
+    }
+    else if(gOledRunInfo.last_index == GUI_COMMON_CONFIG_POINT_RESET)
+    {
+        NVIC_SystemReset();
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_NORMAL)
+    {
+        gParam.st.AlmOutput0 = BOOL_Normal;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        
+        gParam.st.AlmOutput1 = BOOL_Normal;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_ALARM)
+    {
+        gParam.st.AlmOutput0 = BOOL_Alarm;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        
+        gParam.st.AlmOutput1 = BOOL_Alarm;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_CANCEL)
+    {
+        CLEAR_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //取消用指令控制，进行报警控制
+        
+        CLEAR_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //取消用指令控制，进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+
+    OLED_Fill(0); //清屏
+    x = 0;
+    y = 3;
+    index = 0;
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ZHI, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_NENG, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_biao, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ce, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_kong1, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_mo, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zu, OLED_WHITE_ON_BLACK);
+    
+    //oled_display_start_gui_part();
+
+    gOledRunInfo.last_index = page_index;
+}
+#endif
+#if PROD_TYPE == PROD_SFB
+void module_oled_display_start_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t x, y, index;
+
+    if(gOledRunInfo.last_index == GUI_CONFIG_FACTORY_RESET_POINT_YES)
+    {
+        gFlashParam.st.magicNum = 0;
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+        NVIC_SystemReset();
+    }
+    else if(gOledRunInfo.last_index == GUI_COMMON_CONFIG_POINT_RESET)
+    {
+        NVIC_SystemReset();
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_NORMAL)
+    {
+        gParam.st.AlmOutput0 = BOOL_Normal;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        
+        gParam.st.AlmOutput1 = BOOL_Normal;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_ALARM)
+    {
+        gParam.st.AlmOutput0 = BOOL_Alarm;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        
+        gParam.st.AlmOutput1 = BOOL_Alarm;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_CANCEL)
+    {
+        CLEAR_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //取消用指令控制，进行报警控制
+        
+        CLEAR_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //取消用指令控制，进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+
+    OLED_Fill(0); //清屏
+    x = 0;
+    y = 3;
+    index = 0;
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_san, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bu, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ping, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_heng, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ce, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_kong1, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_QI, OLED_WHITE_ON_BLACK);
+    
+    //oled_display_start_gui_part();
+
+    gOledRunInfo.last_index = page_index;
+}
+#endif
+#if PROD_TYPE == PROD_SFE
+void module_oled_display_start_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t x, y, index;
+
+    if(gOledRunInfo.last_index == GUI_CONFIG_FACTORY_RESET_POINT_YES)
+    {
+        gFlashParam.st.magicNum = 0;
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+        NVIC_SystemReset();
+    }
+    else if(gOledRunInfo.last_index == GUI_COMMON_CONFIG_POINT_RESET)
+    {
+        NVIC_SystemReset();
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_NORMAL)
+    {
+        gParam.st.AlmOutput0 = BOOL_Normal;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        
+        gParam.st.AlmOutput1 = BOOL_Normal;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_ALARM)
+    {
+        gParam.st.AlmOutput0 = BOOL_Alarm;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        
+        gParam.st.AlmOutput1 = BOOL_Alarm;
+        SET_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //一旦用指令控制，则不进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+    else if(gOledRunInfo.last_index == GUI_OUTPUT_CONTROL_POINT_CANCEL)
+    {
+        CLEAR_BIT(gFlashParam.st.AlmOutput_SourceLogic0, Output_OnlyCmd_Msk);  //取消用指令控制，进行报警控制
+        
+        CLEAR_BIT(gFlashParam.st.AlmOutput_SourceLogic1, Output_OnlyCmd_Msk);  //取消用指令控制，进行报警控制
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+    }
+
+    OLED_Fill(0); //清屏
+    x = 0;
+    y = 3;
+    index = 0;
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_NENG, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi3, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_l1ang, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ce, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_kong1, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_mo, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zu, OLED_WHITE_ON_BLACK);
+    
+    //oled_display_start_gui_part();
+
+    gOledRunInfo.last_index = page_index;
+}
+#endif
+/**
+  * @brief  模组显示标题内容
+  * @param  title 显示标题
+  * @param  colour 颜色
+  * @retval None
+  */
+//void module_oled_display_title(uint8_t title, uint8_t colour)
+//{
+//    uint8_t x, y, index;
+
+//    index = 0;
+//    y = 0;
+//    switch(title)
+//    {
+//    case GUI_TITLE_MODULE_CONFIG_OUTPUT_CONTROL:
+//        x = 32;
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu1, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chu, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_kong1, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi2, colour);
+//        break;
+
+//    case GUI_TITLE_MODULE_CONFIG_CURRENT_THUP:
+//        x = 32;
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shang, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xian2, colour);
+//        break;
+
+//    case GUI_TITLE_MODULE_CONFIG_TEMP_THUP:
+//        x = 32;
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wen, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_du, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shang, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xian2, colour);
+//        break;
+
+//    default:
+//        break;
+//    }
+//}
+
+/**
+  * @brief  查询参数显示部分内容
+  * @param  part 显示部分
+  * @param  colour 显示颜色
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  * @retval None
+  */
+void module_oled_display_lookup_param_gui_part(uint8_t part, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    switch(part)
+    {
+    case GUI_LOOKUP_PARAM_POINT_U1_U2_U3:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"1. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_U12_U23_U31:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"2. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xlan, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_F:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"3. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_pin, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_I1_I2_I3:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"4. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_P1_P2_P3:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"5. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_you, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"6. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_S1_S2_S3:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"7. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shi1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zai1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"8. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_yin, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_P_Q_S:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"9. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_PF:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"10.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_yin, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_DI1_DI2:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"11.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_si, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ru, colour);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_DO1_DO2:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"12.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liang, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chu, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_CURRENT:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"13.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_sheng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_yu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, colour);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_T1_T2:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"14.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wen, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_du, colour);
+        OLED_ShowStr(x + (16 * index++), y, (uint8_t *)"1/2", OLED_CHAR_EN_SIZE_8x16, colour);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_T3_T4:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"15.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wen, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_du, colour);
+        OLED_ShowStr(x + (16 * index++), y, (uint8_t *)"3/4", OLED_CHAR_EN_SIZE_8x16, colour);
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  查询参数
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_lookup_param_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_LOOKUP_PARAM_POINT_U1_U2_U3:
+    case GUI_LOOKUP_PARAM_POINT_U12_U23_U31:
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_F: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_I1_I2_I3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P1_P2_P3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_I1_I2_I3:
+    case GUI_LOOKUP_PARAM_POINT_P1_P2_P3:
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_S1_S2_S3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P_Q_S, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_S1_S2_S3:
+    case GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3:
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_P_Q_S:  //主菜单第3页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DI1_DI2, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DO1_DO2, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_PF:
+    case GUI_LOOKUP_PARAM_POINT_DI1_DI2:     
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_DO1_DO2:  //主菜单第4页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_CURRENT, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T1_T2, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T3_T4, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_CURRENT:
+    case GUI_LOOKUP_PARAM_POINT_T1_T2:     
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+    case GUI_LOOKUP_PARAM_POINT_T3_T4:  //主菜单第4页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U1_U2_U3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U12_U23_U31, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_F, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_LOOKUP_PARAM_POINT_U1_U2_U3 && page_index <= GUI_LOOKUP_PARAM_POINT_F)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U1_U2_U3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U12_U23_U31, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_F, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_I1_I2_I3 && page_index <= GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_I1_I2_I3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P1_P2_P3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_S1_S2_S3 && page_index <= GUI_LOOKUP_PARAM_POINT_P_Q_S)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_S1_S2_S3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P_Q_S, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_PF && page_index <= GUI_LOOKUP_PARAM_POINT_DO1_DO2)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DI1_DI2, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DO1_DO2, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_CURRENT && page_index <= GUI_LOOKUP_PARAM_POINT_T3_T4)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_CURRENT, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T1_T2, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T3_T4, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_lookup_param_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  查询参数
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_lookup_param_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_LOOKUP_PARAM_POINT_U12_U23_U31:
+    case GUI_LOOKUP_PARAM_POINT_F:
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_DI1_DI2:
+    case GUI_LOOKUP_PARAM_POINT_DO1_DO2:
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_T1_T2:
+    case GUI_LOOKUP_PARAM_POINT_T3_T4:
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_P1_P2_P3:
+    case GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3:
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3:
+    case GUI_LOOKUP_PARAM_POINT_P_Q_S:
+        module_oled_display_lookup_param_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_PF: 
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_S1_S2_S3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P_Q_S, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_CURRENT: 
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DI1_DI2, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DO1_DO2, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_U1_U2_U3: 
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_CURRENT, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T1_T2, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T3_T4, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_I1_I2_I3: 
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U1_U2_U3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U12_U23_U31, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_F, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_S1_S2_S3: 
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_I1_I2_I3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P1_P2_P3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, OLED_WHITE_ON_BLACK);
+        break;
+    
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_LOOKUP_PARAM_POINT_U1_U2_U3 && page_index <= GUI_LOOKUP_PARAM_POINT_F)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U1_U2_U3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U12_U23_U31, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_F, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_I1_I2_I3 && page_index <= GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_I1_I2_I3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P1_P2_P3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_S1_S2_S3 && page_index <= GUI_LOOKUP_PARAM_POINT_P_Q_S)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_S1_S2_S3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P_Q_S, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_PF && page_index <= GUI_LOOKUP_PARAM_POINT_DO1_DO2)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DI1_DI2, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DO1_DO2, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_CURRENT && page_index <= GUI_LOOKUP_PARAM_POINT_T3_T4)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_CURRENT, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T1_T2, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T3_T4, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_lookup_param_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void module_oled_display_lookup_param_gui_r(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_LOOKUP_PARAM_POINT_U1_U2_U3:
+    case GUI_LOOKUP_PARAM_POINT_U12_U23_U31:
+    case GUI_LOOKUP_PARAM_POINT_F: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_I1_I2_I3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P1_P2_P3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_I1_I2_I3:
+    case GUI_LOOKUP_PARAM_POINT_P1_P2_P3: 
+    case GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3:  
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_S1_S2_S3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P_Q_S, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_S1_S2_S3:
+    case GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3:
+    case GUI_LOOKUP_PARAM_POINT_P_Q_S:  //主菜单第3页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DI1_DI2, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DO1_DO2, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_PF:
+    case GUI_LOOKUP_PARAM_POINT_DI1_DI2:
+    case GUI_LOOKUP_PARAM_POINT_DO1_DO2:  //主菜单第3页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_CURRENT, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T1_T2, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T3_T4, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_CURRENT:
+    case GUI_LOOKUP_PARAM_POINT_T1_T2:
+    case GUI_LOOKUP_PARAM_POINT_T3_T4:  //主菜单第3页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U1_U2_U3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U12_U23_U31, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_F, OLED_WHITE_ON_BLACK);
+        break;
+    
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_LOOKUP_PARAM_POINT_U1_U2_U3 && page_index <= GUI_LOOKUP_PARAM_POINT_F)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U1_U2_U3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U12_U23_U31, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_F, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_I1_I2_I3 && page_index <= GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_I1_I2_I3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P1_P2_P3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_S1_S2_S3 && page_index <= GUI_LOOKUP_PARAM_POINT_P_Q_S)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_S1_S2_S3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P_Q_S, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_PF && page_index <= GUI_LOOKUP_PARAM_POINT_DO1_DO2)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DI1_DI2, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DO1_DO2, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_CURRENT && page_index <= GUI_LOOKUP_PARAM_POINT_T3_T4)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_CURRENT, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T1_T2, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T3_T4, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_lookup_param_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void module_oled_display_lookup_param_gui_l(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_LOOKUP_PARAM_POINT_U1_U2_U3:
+    case GUI_LOOKUP_PARAM_POINT_U12_U23_U31:
+    case GUI_LOOKUP_PARAM_POINT_F: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_CURRENT, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T1_T2, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T3_T4, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_LOOKUP_PARAM_POINT_I1_I2_I3:
+    case GUI_LOOKUP_PARAM_POINT_P1_P2_P3: 
+    case GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3:  
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U1_U2_U3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U12_U23_U31, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_F, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_S1_S2_S3:
+    case GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3:
+    case GUI_LOOKUP_PARAM_POINT_P_Q_S:  //主菜单第3页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_I1_I2_I3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P1_P2_P3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_PF:
+    case GUI_LOOKUP_PARAM_POINT_DI1_DI2:
+    case GUI_LOOKUP_PARAM_POINT_DO1_DO2:  //主菜单第3页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_S1_S2_S3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P_Q_S, OLED_WHITE_ON_BLACK);
+        break;
+    
+    case GUI_LOOKUP_PARAM_POINT_CURRENT:
+    case GUI_LOOKUP_PARAM_POINT_T1_T2:
+    case GUI_LOOKUP_PARAM_POINT_T3_T4:  //主菜单第3页最后一行
+        oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DI1_DI2, OLED_WHITE_ON_BLACK);
+        module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DO1_DO2, OLED_WHITE_ON_BLACK);
+        break;
+    
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_LOOKUP_PARAM_POINT_U1_U2_U3 && page_index <= GUI_LOOKUP_PARAM_POINT_F)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U1_U2_U3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_U12_U23_U31, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_F, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_I1_I2_I3 && page_index <= GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_I1_I2_I3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P1_P2_P3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_Q1_Q2_Q3, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_S1_S2_S3 && page_index <= GUI_LOOKUP_PARAM_POINT_P_Q_S)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_S1_S2_S3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF1_PF2_PF3, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_P_Q_S, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_PF && page_index <= GUI_LOOKUP_PARAM_POINT_DO1_DO2)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_PF, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DI1_DI2, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_DO1_DO2, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_LOOKUP_PARAM_POINT_CURRENT && page_index <= GUI_LOOKUP_PARAM_POINT_T3_T4)
+        {
+            oled_display_title(GUI_TITLE_LOOKUP_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_CURRENT, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T1_T2, OLED_WHITE_ON_BLACK);
+            module_oled_display_lookup_param_gui_part(GUI_LOOKUP_PARAM_POINT_T3_T4, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_lookup_param_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  查询参数显示部分内容
+  * @param  part 显示部分
+  *            @arg GUI_LOOKUP_PARAM_POINT_T1_T2: 1.温度1/2
+  *            @arg GUI_LOOKUP_PARAM_POINT_T3_T4: 2.温度3/4
+  *            @arg GUI_LOOKUP_PARAM_POINT_CURRENT: 3.漏流
+  *            @arg GUI_ELECTRIC_PARAM_POINT_DI_DO: 4.输入输出
+  * @param  clear 清除使能
+  * @retval None
+  */
+void module_oled_display_electric_param_gui_part(uint8_t part, uint8_t clear)
+{
+    switch(part)
+    {
+    case GUI_ELECTRIC_PARAM_POINT_U1_U2_U3:
+        oled_display_L_voltage(2, 1, gMeterParam.Volt[0], clear);
+        oled_display_L_voltage(4, 2, gMeterParam.Volt[1], clear);
+        oled_display_L_voltage(6, 3, gMeterParam.Volt[2], clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_U12_U23_U31:
+        oled_display_L_voltage(2, 12, gMeterParam.VoltL[0], clear);
+        oled_display_L_voltage(4, 23, gMeterParam.VoltL[1], clear);
+        oled_display_L_voltage(6, 31, gMeterParam.VoltL[2], clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_F:
+        oled_display_L_frequency(2, gMeterParam.Freq, clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_I1_I2_I3:
+        oled_display_L_current(2, 1, gMeterParam.Curr[0], clear);
+        oled_display_L_current(4, 2, gMeterParam.Curr[1], clear);
+        oled_display_L_current(6, 3, gMeterParam.Curr[2], clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_P1_P2_P3:
+        oled_display_L_power(2, 1, gMeterParam.PowP[0], 1, clear);
+        oled_display_L_power(4, 2, gMeterParam.PowP[1], 1, clear);
+        oled_display_L_power(6, 3, gMeterParam.PowP[2], 1, clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3:
+        oled_display_L_power(2, 1, gMeterParam.PowQ[0], 2, clear);
+        oled_display_L_power(4, 2, gMeterParam.PowQ[1], 2, clear);
+        oled_display_L_power(6, 3, gMeterParam.PowQ[2], 2, clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_S1_S2_S3:
+        oled_display_L_power(2, 1, gMeterParam.PowS[0], 3, clear);
+        oled_display_L_power(4, 2, gMeterParam.PowS[1], 3, clear);
+        oled_display_L_power(6, 3, gMeterParam.PowS[2], 3, clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3:
+        oled_display_L_power_factor(2, 1, gMeterParam.Pf[0], clear);
+        oled_display_L_power_factor(4, 2, gMeterParam.Pf[1], clear);
+        oled_display_L_power_factor(6, 3, gMeterParam.Pf[2], clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_P_Q_S:
+        oled_display_L_power(2, 4, gMeterParam.PowP[3], 1, clear);
+        oled_display_L_power(4, 4, gMeterParam.PowQ[3], 2, clear);
+        oled_display_L_power(6, 4, gMeterParam.PowS[3], 3, clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_PF:
+        oled_display_L_power_factor(2, 4, gMeterParam.Pf[3], clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_DI1_DI2:
+        oled_display_DI_Status(4, 1, gESE_Elem.st.DI[0], 1, clear);
+        oled_display_DI_Status(6, 2, gESE_Elem.st.DI[1], 1, clear);
+        oled_display_DI_Status(4, 3, gESE_Elem.st.DI[2], 1, clear);
+        oled_display_DI_Status(6, 4, gESE_Elem.st.DI[3], 1, clear);
+        break;
+    
+    case GUI_ELECTRIC_PARAM_POINT_DO1_DO2:
+        oled_display_DO_Status(2, 1, gESE_Elem.st.DO[0], 2, clear);
+        oled_display_DO_Status(4, 2, gESE_Elem.st.DO[1], 2, clear);
+        break;
+    
+    case GUI_ELECTRIC_PARAM_POINT_CURRENT: 
+        oled_display_leakage_current(2, 7, gMeterParam.Cur, clear);
+        break;
+    
+    case GUI_ELECTRIC_PARAM_POINT_T1_T2:
+        oled_display_temperature(2, 1, gESE_Elem.st.Tmp[0], clear);
+        oled_display_temperature(4, 2, gESE_Elem.st.Tmp[1], clear);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_T3_T4:
+        oled_display_temperature(2, 3, gESE_Elem.st.Tmp[2], clear);
+        oled_display_temperature(4, 4, gESE_Elem.st.Tmp[3], clear);
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  电气参数显示
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_electric_param_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t clear;
+
+    if(gOledRunInfo.last_index >= GUI_ELECTRIC_PARAM_POINT_U1_U2_U3 && gOledRunInfo.last_index <= GUI_ELECTRIC_PARAM_POINT_T3_T4)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8);
+        clear = OLED_DISPLAY_KEEP;
+    }
+    else if(gOledRunInfo.last_index == GUI_MAIN_MENU_POINT_LOOP_PARAM) //从主菜单的轮询模式进入的
+    {
+        SET_BIT(gOledRunInfo.flag, OLED_FLAG_LOOP_PARAM); //进入轮询显示
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        clear = OLED_DISPLAY_CLEAR;
+    }
+    else
+    {
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        clear = OLED_DISPLAY_CLEAR;
+    }
+
+    switch(page_index)
+    {
+    case GUI_ELECTRIC_PARAM_POINT_U1_U2_U3:
+        oled_display_title(GUI_TITLE_ELECTRIC_PARAM, GUI_TITLE_HAVE_RIGHT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_U12_U23_U31:
+    case GUI_ELECTRIC_PARAM_POINT_F:
+    case GUI_ELECTRIC_PARAM_POINT_I1_I2_I3:
+    case GUI_ELECTRIC_PARAM_POINT_P1_P2_P3:
+    case GUI_ELECTRIC_PARAM_POINT_Q1_Q2_Q3:
+    case GUI_ELECTRIC_PARAM_POINT_S1_S2_S3:
+    case GUI_ELECTRIC_PARAM_POINT_PF1_PF2_PF3:
+    case GUI_ELECTRIC_PARAM_POINT_P_Q_S:
+    case GUI_ELECTRIC_PARAM_POINT_PF:
+    case GUI_ELECTRIC_PARAM_POINT_DI1_DI2:
+    case GUI_ELECTRIC_PARAM_POINT_DO1_DO2:
+    case GUI_ELECTRIC_PARAM_POINT_CURRENT:
+    case GUI_ELECTRIC_PARAM_POINT_T1_T2:
+        oled_display_title(GUI_TITLE_ELECTRIC_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    case GUI_ELECTRIC_PARAM_POINT_T3_T4:
+        oled_display_title(GUI_TITLE_ELECTRIC_PARAM, GUI_TITLE_HAVE_LEFT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    default:
+        break;
+    }
+
+    module_oled_display_electric_param_gui_part(page_index, OLED_DISPLAY_CLEAR);
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  报警是否变化
+  * @param  None
+  * @retval 是(1) 否(0)
+  */
+uint8_t is_alarm_trig(void)
+{
+    static uint16_t OldAlm;
+
+    if(OldAlm == gParam.st.State_Alarm[StateAlm0])
+    {
+        return 0;
+    }
+    else
+    {
+        OldAlm = gParam.st.State_Alarm[StateAlm0];
+        return 1;
+    }
+}
+
+uint8_t is_alarm1_trig(void)
+{
+    static uint16_t OldAlm1;
+
+    if(OldAlm1 == gParam.st.State_Alarm[StateAlm1])
+    {
+        return 0;
+    }
+    else
+    {
+        OldAlm1 = gParam.st.State_Alarm[StateAlm1];
+        return 1;
+    }
+}
+
+uint8_t is_alarm2_trig(void)
+{
+    static uint16_t OldAlm2;
+
+    if(OldAlm2 == gParam.st.State_Alarm[StateAlm2])
+    {
+        return 0;
+    }
+    else
+    {
+        OldAlm2 = gParam.st.State_Alarm[StateAlm2];
+        return 1;
+    }
+}
+
+uint8_t is_alarm3_trig(void)
+{
+    static uint16_t OldAlm3;
+
+    if(OldAlm3 == gParam.st.State_Alarm[StateAlm3])
+    {
+        return 0;
+    }
+    else
+    {
+        OldAlm3 = gParam.st.State_Alarm[StateAlm3];
+        return 1;
+    }
+}
+
+uint8_t is_alarm4_trig(void)
+{
+    static uint16_t OldAlm4;
+
+    if(OldAlm4 == gParam.st.State_Alarm[StateAlm4])
+    {
+        return 0;
+    }
+    else
+    {
+        OldAlm4 = gParam.st.State_Alarm[StateAlm4];
+        return 1;
+    }
+}
+
+/**
+  * @brief  报警信息显示部分内容
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_alarm_info_part(void)
+{
+    uint8_t x, y, index;
+
+    if(READ_BIT(gParam.st.State_Alarm[StateAlm0], StateAlm0_ALL_Msk) || 
+       READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_ALL_Msk) || 
+       READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_ALL_Msk) || 
+       READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_ALL_Msk))
+    {
+        AlarmChange++;
+        if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_ALL_Msk) && AlarmChange == 1)
+        {
+            AlarmChange++;
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+            y = 0;
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL1_Msk))
+            {
+                x = 0;
+                y += 2;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL_Up_Msk))
+                {
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL1_Up_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  
+                        x += 10;
+                    }
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL2_Up_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"B", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                        x += 10;
+                    }
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL3_Up_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"C", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                        x += 10;
+                    }
+                    index = 0;
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_guo, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, OLED_WHITE_ON_BLACK);
+                    x += 50;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL_Down_Msk))
+                {                
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL1_Down_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  
+                        x += 10;
+                    }
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL2_Down_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"B", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                        x += 10;
+                    }
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_VOL3_Down_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"C", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                        x += 10;
+                    }
+                    index = 0;
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_qian, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, OLED_WHITE_ON_BLACK);
+                }
+            }            
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR1_Msk))
+            {
+                x = 0;
+                y += 2;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR_Up_Msk))
+                {
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR1_Up_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  
+                        x += 10;
+                    }
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR2_Up_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"B", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                        x += 10;
+                    }
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR3_Up_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"C", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                        x += 10;
+                    }
+                    index = 0;
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_guo, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, OLED_WHITE_ON_BLACK);
+                    x += 50;
+                }                
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR_Down_Msk))
+                {                
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR1_Down_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  
+                        x += 10;
+                    }
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR2_Down_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"B", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                        x += 10;
+                    }
+                    if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR3_Down_Msk))
+                    {
+                        OLED_ShowStr(x, y, (uint8_t *)"C", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                        x += 10;
+                    }
+                    index = 0;
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_qian, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, OLED_WHITE_ON_BLACK);
+                }
+            }        
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm1], StateAlm1_CUR_Msk))
+            {
+                x = 0;
+                y += 2;
+                index = 0;
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lou, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+            }
+            osDelay(180);
+        }
+#if PROD_TYPE == PROD_SFE
+        if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_ALL_Msk) && AlarmChange == 2)
+        {
+            AlarmChange++;
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+            y = 0;
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_IMB_Msk))
+            {
+                x = 0;
+                y += 2;
+                index = 0;          
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_VOL_IMB_Msk))
+                {
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, OLED_WHITE_ON_BLACK);
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_CUR_IMB_Msk))
+                {
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, OLED_WHITE_ON_BLACK);        
+                }
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bu, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ping, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_heng, OLED_WHITE_ON_BLACK);
+            }
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_THD_Msk))
+            {
+                x = 0;
+                y += 2;
+                index = 0;          
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_VOL_THD_Msk))
+                {
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, OLED_WHITE_ON_BLACK);
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_CUR_THD_Msk))
+                {
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, OLED_WHITE_ON_BLACK);        
+                }
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xie, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bo, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+            }
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm0], StateAlm0_LOAD_Msk))
+            {
+                x = 0;
+                y += 2;
+                index = 0;          
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_e, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_x, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_f, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_z, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+            }
+            osDelay(180);
+        }
+#elif PROD_TYPE == PROD_SFB
+        if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_ALL_Msk) && AlarmChange == 2)
+        {
+            AlarmChange++;
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+            y = 0;
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW_Up_Msk))
+            {
+                x = 0;
+                y += 2;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW1_Up_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW2_Up_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"B", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW3_Up_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"C", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                index = 0;
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_guo, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, OLED_WHITE_ON_BLACK);
+            }
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW_Down_Msk))
+            {    
+                x = 0;
+                y += 2;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW1_Down_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW1_Down_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"B", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW1_Down_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"C", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                index = 0;
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_qian, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, OLED_WHITE_ON_BLACK);
+            }
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_IMB_Msk))
+            {
+                x = 0;
+                y += 2;
+                index = 0;          
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_VOL_IMB_Msk))
+                {
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, OLED_WHITE_ON_BLACK);
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_CUR_IMB_Msk))
+                {
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, OLED_WHITE_ON_BLACK);
+                    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, OLED_WHITE_ON_BLACK);        
+                }
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bu, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ping, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_heng, OLED_WHITE_ON_BLACK);
+            }
+            osDelay(180);
+        }
+#elif PROD_TYPE == PROD_SFA
+        if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_ALL_Msk) && AlarmChange == 2)
+        {
+            AlarmChange++;
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+            y = 0;
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW_Up_Msk))
+            {
+                x = 0;
+                y += 2;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW1_Up_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW2_Up_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"B", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW3_Up_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"C", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                index = 0;
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_guo, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, OLED_WHITE_ON_BLACK);
+            }
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW_Down_Msk))
+            {    
+                x = 0;
+                y += 2;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW1_Down_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"A", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);  
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW1_Down_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"B", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm2], StateAlm2_POW1_Down_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"C", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                index = 0;
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_qian, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, OLED_WHITE_ON_BLACK);
+            }
+            osDelay(180);
+        }
+#endif
+        if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_ALL_Msk) && AlarmChange == 3)
+        {
+            AlarmChange = 1;
+            OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+            y = 0;
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_DI_Msk))
+            {      
+                x = 0;
+                y += 2;
+                index = 0;
+                OLED_ShowStr(x + (16 * index++), y, (uint8_t *)"In", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                x += 19;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_DI1_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"1", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_DI2_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"2", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_DI3_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"3", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_DI4_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"4", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                x += 3;
+                index = 0;
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+            }            
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_DO_Msk))
+            {                
+                x = 0;
+                y += 2;
+                index = 0;
+                OLED_ShowStr(x + (16 * index++), y, (uint8_t *)"Out", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                x += 27;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_DO1_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"1", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_DO2_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"2", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                x += 3;
+                index = 0;
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+            }           
+            if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_TMP_Msk))
+            {
+                x = 0;
+                y += 2;
+                index = 0;
+                OLED_ShowStr(x + (16 * index++), y, (uint8_t *)"Temp", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                x += 35;
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_TMP1_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"1", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_TMP2_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"2", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_TMP3_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"3", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }
+                if(READ_BIT(gParam.st.State_Alarm[StateAlm3], StateAlm3_TMP4_Msk))
+                {
+                    OLED_ShowStr(x, y, (uint8_t *)"4", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+                    x += 10;
+                }  
+                x += 3;            
+                index = 0;
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, OLED_WHITE_ON_BLACK);
+                OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, OLED_WHITE_ON_BLACK);
+            }
+        }
+        osDelay(180);
+    }
+    else
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        x = 0;
+        y = 2;
+        OLED_ShowCN(x, y, OLED_CHAR_wu, OLED_WHITE_ON_BLACK);
+    }
+}
+
+/**
+  * @brief  报警信息显示
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_alarm_info(uint8_t page_index, uint8_t key_val)
+{
+    OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+    oled_display_title(GUI_MAIN_MENU_POINT_ALARM_INFO, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_BLACK_ON_WHITE);
+    module_oled_display_alarm_info_part();
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  网关信息显示部分内容
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_com_info_part(void)
+{
+    uint8_t x, y, index;
+//    uint8_t rssi;
+    uint8_t str[17];
+
+    memcpy(str, gFlashParam.st.idInfo, 16);
+    str[16] = '\0';
+    OLED_ShowStr(0, 2, str, OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    
+    x = 0;
+    y = 4;
+    index = 0;
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lian, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jie, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_fang, OLED_WHITE_ON_BLACK);
+    OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shl, OLED_WHITE_ON_BLACK);
+    OLED_ShowStr(x + (16 * index++), y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+    
+    if(gWANor4G == 0)
+    {
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wei, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_pei, OLED_WHITE_ON_BLACK);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi1, OLED_WHITE_ON_BLACK);
+    }
+    else if(gWANor4G == 1)
+    {
+        OLED_ShowStr(x + (16 * index++), y, (uint8_t *)"WAN", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);        
+    }
+    else if(gWANor4G == 2)
+    {
+        OLED_ShowStr(x + (16 * index++), y, (uint8_t *)"4G", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+//        x = 0;
+//        y = 6;
+//        index = 0;
+//        OLED_ShowStr(x + (16 * index++), y, (uint8_t *)"4G", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xin, OLED_WHITE_ON_BLACK);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_hao, OLED_WHITE_ON_BLACK);
+//        OLED_ShowStr(x + (16 * index++), y, (uint8_t *)": ", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);                
+//        
+//        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 64, 128, y, y + 2); //清除该行
+//        
+//        rssi = gtv_PlcElement.msp_SDElement[SD226];
+//        rssi+=100;
+//        LOGE(TAG, "rssi = %d", rssi);
+//        if(rssi>20)
+//        {
+//            OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zheng, OLED_WHITE_ON_BLACK);
+//            OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chang, OLED_WHITE_ON_BLACK);
+//        }
+//        else if(rssi<20 && rssi>0)
+//        {
+//            OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_yl, OLED_WHITE_ON_BLACK);
+//            OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_baN, OLED_WHITE_ON_BLACK);
+//        }
+//        else
+//        {
+//            OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ji, OLED_WHITE_ON_BLACK);
+//            OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_cha, OLED_WHITE_ON_BLACK);
+//        }
+    }
+}
+
+/**
+  * @brief  网关信息显示
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_com_info(uint8_t page_index, uint8_t key_val)
+{
+    OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+    oled_display_title(GUI_MAIN_MENU_POINT_COM_INFO, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_BLACK_ON_WHITE);
+    module_oled_display_com_info_part();
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  模组设置显示部分内容
+  * @param  part 显示部分
+  *            @arg GUI_MODULE_CONFIG_POINT_COUNT_SET: 1.计数设置
+  * @param  colour 显示颜色
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  * @retval None
+  */
+void module_oled_display_module_config_gui_part(uint8_t part, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    switch(part)
+    {
+    case GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"1. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_kong1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi2, colour);
+        break;
+
+    case GUI_MODULE_CONFIG_POINT_CURRENT_THUP:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"2. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shang, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xian2, colour);
+        break;
+
+    case GUI_MODULE_CONFIG_POINT_TEMP_THUP:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"3. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wen, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_du, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shang, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xian2, colour);
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  模组设置
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_module_config_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL:
+    case GUI_MODULE_CONFIG_POINT_CURRENT_THUP:
+    case GUI_MODULE_CONFIG_POINT_TEMP_THUP:
+        module_oled_display_module_config_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    default:
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        oled_display_title(GUI_TITLE_MODULE_CONFIG, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+        module_oled_display_module_config_gui_part(GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, OLED_WHITE_ON_BLACK);
+        module_oled_display_module_config_gui_part(GUI_MODULE_CONFIG_POINT_CURRENT_THUP, OLED_WHITE_ON_BLACK);
+        module_oled_display_module_config_gui_part(GUI_MODULE_CONFIG_POINT_TEMP_THUP, OLED_WHITE_ON_BLACK);
+        break;
+    }
+
+    module_oled_display_module_config_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  模组设置
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_module_config_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL:
+    case GUI_MODULE_CONFIG_POINT_CURRENT_THUP:
+    case GUI_MODULE_CONFIG_POINT_TEMP_THUP:
+        module_oled_display_module_config_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    default:
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        oled_display_title(GUI_TITLE_MODULE_CONFIG, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+        module_oled_display_module_config_gui_part(GUI_MODULE_CONFIG_POINT_OUTPUT_CONTROL, OLED_WHITE_ON_BLACK);
+        module_oled_display_module_config_gui_part(GUI_MODULE_CONFIG_POINT_CURRENT_THUP, OLED_WHITE_ON_BLACK);
+        module_oled_display_module_config_gui_part(GUI_MODULE_CONFIG_POINT_TEMP_THUP, OLED_WHITE_ON_BLACK);
+        break;
+    }
+
+    module_oled_display_module_config_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+
+/**
+  * @brief  输出控制显示部分内容
+  * @param  part 显示部分
+  *            @arg GUI_OUTPUT_CONTROL_POINT_NORMAL: 1.正常
+  *            @arg GUI_OUTPUT_CONTROL_POINT_ALARM: 2.报警
+  *            @arg GUI_OUTPUT_CONTROL_POINT_CANCEL: 3.取消
+  * @param  colour 显示颜色
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  * @retval None
+  */
+void module_oled_display_output_control_gui_part(uint8_t part, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    switch(part)
+    {
+    case GUI_OUTPUT_CONTROL_POINT_NORMAL:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"1. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zheng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chang, colour);
+        break;
+
+    case GUI_OUTPUT_CONTROL_POINT_ALARM:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"2. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bao, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jing, colour);
+        break;
+
+    case GUI_OUTPUT_CONTROL_POINT_CANCEL:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"3. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_qu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xiao, colour);
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  输出控制
+            ————————————————————————
+            |       输出控制       |
+            | 1. 正常              |
+            | 2. 报警              |
+            | 3. 取消              |
+            ————————————————————————
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_output_control_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_OUTPUT_CONTROL_POINT_NORMAL:
+    case GUI_OUTPUT_CONTROL_POINT_ALARM:
+    case GUI_OUTPUT_CONTROL_POINT_CANCEL:
+        module_oled_display_output_control_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        oled_display_title(GUI_TITLE_MODULE_CONFIG_OUTPUT_CONTROL, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+        module_oled_display_output_control_gui_part(GUI_OUTPUT_CONTROL_POINT_NORMAL, OLED_WHITE_ON_BLACK);
+        module_oled_display_output_control_gui_part(GUI_OUTPUT_CONTROL_POINT_ALARM, OLED_WHITE_ON_BLACK);
+        module_oled_display_output_control_gui_part(GUI_OUTPUT_CONTROL_POINT_CANCEL, OLED_WHITE_ON_BLACK);
+        break;
+    }
+
+    module_oled_display_output_control_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  输出控制
+            ————————————————————————
+            |       输出控制       |
+            | 1. 正常              |
+            | 2. 报警              |
+            | 3. 取消              |
+            ————————————————————————
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_output_control_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_OUTPUT_CONTROL_POINT_NORMAL:
+    case GUI_OUTPUT_CONTROL_POINT_ALARM:
+    case GUI_OUTPUT_CONTROL_POINT_CANCEL:
+        module_oled_display_output_control_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        oled_display_title(GUI_TITLE_MODULE_CONFIG_OUTPUT_CONTROL, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+        module_oled_display_output_control_gui_part(GUI_OUTPUT_CONTROL_POINT_NORMAL, OLED_WHITE_ON_BLACK);
+        module_oled_display_output_control_gui_part(GUI_OUTPUT_CONTROL_POINT_ALARM, OLED_WHITE_ON_BLACK);
+        module_oled_display_output_control_gui_part(GUI_OUTPUT_CONTROL_POINT_CANCEL, OLED_WHITE_ON_BLACK);
+        break;
+    }
+
+    module_oled_display_output_control_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  配置电流上限
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_config_current_thup_gui(uint8_t page_index, uint8_t key_val)
+{
+    static uint8_t set_bit = 0;
+    uint8_t sign, all_bit, point_bit;
+
+    sign = 0;
+    all_bit = 5;
+    point_bit = 1;
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_CONFIG_CURRENT_THUP:
+        if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 5)
+        {
+            btnow = 0;
+            oled_set_data_bit_loop_add_one(&gTemp_config_param, sign, all_bit, set_bit);
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_KEEP);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 1)
+        {
+            btnow = 0;
+            oled_set_data_bit_loop_minus_one(&gTemp_config_param, sign, all_bit, set_bit);
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_KEEP);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 2)
+        {
+            btnow = 0;
+            set_bit = set_bit + 1 >= all_bit ? 0 : set_bit + 1;
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 4)
+        {
+            btnow = 0;
+            set_bit = set_bit - 1 < 0 ? 4 : set_bit - 1;
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        }
+        break;
+
+    default:
+        gTemp_config_param = gFlashParam.st.Cur_THUp;
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        oled_display_title(GUI_TITLE_MODULE_CONFIG_CURRENT_THUP, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+        oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        OLED_ShowStr(111, 2, (uint8_t *)"mA", OLED_CHAR_EN_SIZE_8x16, OLED_WHITE_ON_BLACK);
+        break;
+    }
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  配置温度上限
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_config_temp_thup_gui(uint8_t page_index, uint8_t key_val)
+{
+    static uint8_t set_bit = 0;
+    uint8_t sign, all_bit, point_bit;
+
+    sign = 1;
+    all_bit = 5;
+    point_bit = 1;
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_CONFIG_TEMP_THUP:
+        if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 5)
+        {
+            btnow = 0;
+            oled_set_data_bit_loop_add_one(&gTemp_config_param, sign, all_bit, set_bit);
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_KEEP);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 1)
+        {
+            btnow = 0;
+            oled_set_data_bit_loop_minus_one(&gTemp_config_param, sign, all_bit, set_bit);
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_KEEP);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 2)
+        {
+            btnow = 0;
+            set_bit = set_bit + 1 >= all_bit ? 0 : set_bit + 1;
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        }
+        else if(key_val == FLEX_BTN_PRESS_CLICK && btnow == 4)
+        {
+            btnow = 0;
+            set_bit = set_bit - 1 < 0 ? 4 : set_bit - 1;
+            oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        }
+        break;
+
+    default:
+        if(gFlashParam.st.Temp_THUp > 9999)
+        {
+            gTemp_config_param = 9999;
+        }
+        else if(gFlashParam.st.Temp_THUp < -9999)
+        {
+            gTemp_config_param = (uint32_t) -9999;
+        }
+        else
+        {
+            gTemp_config_param = (int32_t)gFlashParam.st.Temp_THUp;
+        }
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        oled_display_title(GUI_TITLE_MODULE_CONFIG_TEMP_THUP, GUI_TITLE_HAVE_NONE, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+        oled_display_config_data_content(gTemp_config_param, sign, all_bit, point_bit, set_bit, OLED_DISPLAY_CLEAR);
+        OLED_ShowCN(111, 2, OLED_CHAR_sheshidu, OLED_WHITE_ON_BLACK); //℃
+        break;
+    }
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  模组显示标题内容
+  * @param  title 显示标题
+  * @param  colour 颜色
+  * @retval None
+  */
+void module_oled_display_title(uint8_t title, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    index = 0;
+    y = 0;
+    switch(title)
+    {
+    case GUI_TITLE_MODULE_CONFIG_OUTPUT_CONTROL:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_kong1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi2, colour);
+        break;
+
+    case GUI_TITLE_MODULE_CONFIG_CURRENT_THUP:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shang, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xian2, colour);
+        break;
+
+    case GUI_TITLE_MODULE_CONFIG_TEMP_THUP:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wen, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_du, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shang, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xian2, colour);
+        break;
+        
+//    case GUI_TITLE_MODULE_CONFIG_OUTPUT_CONTROL:
+//        x = 32;
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu1, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_chu, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_kong1, colour);
+//        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zhi2, colour);
+//        break;
+
+    case GUI_TITLE_ENERGY_PARAM_LOOKUP:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_can, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        break;
+
+    case GUI_TITLE_ENERGY_PARAM:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ju, colour);
+        break;
+
+    case GUI_TITLE_HARMONIC_PARAM_LOOKUP:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xie, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bo, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_can, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        break;
+
+    case GUI_TITLE_HARMONIC_PARAM:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xie, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bo, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ju, colour);
+        break;
+
+    case GUI_TITLE_XIANG_PARAM_LOOKUP:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wel, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_can, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        break;    
+    
+    case GUI_TITLE_XIANG_PARAM:
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wel, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_shu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ju, colour);
+        break;  
+    
+    default:
+        break;
+    }
+}
+
+
+/**
+  * @brief  电能查询显示部分内容
+  * @param  part 显示部分
+  * @param  colour 显示颜色
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  * @retval None
+  */
+void module_oled_display_energy_param_lookup_gui_part(uint8_t part, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    switch(part)
+    {
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPI:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"1.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 15;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zheng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xiang1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_you, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPE:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"2.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 15;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_fan, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xiang1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_you, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EP:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"3.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 15;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_you, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQL:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"4.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 15;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zheng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xiang1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQC:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"5.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 15;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_fan, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xiang1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQ:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"6.", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 15;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_zong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_wu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_gong, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_neng, colour);
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  电能查询
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_energy_param_lookup_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPI:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPE:
+        module_oled_display_energy_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EP: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQL:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQC:
+        module_oled_display_energy_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQ:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EP, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_ENERGY_PARAM_LOOKUP_POINT_EPI && page_index <= GUI_ENERGY_PARAM_LOOKUP_POINT_EP)
+        {
+            oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EP, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_ENERGY_PARAM_LOOKUP_POINT_EQL && page_index <= GUI_ENERGY_PARAM_LOOKUP_POINT_EQ)
+        {
+            oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_energy_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void module_oled_display_energy_param_lookup_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EP:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPE:
+        module_oled_display_energy_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPI: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQ:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQC:
+        module_oled_display_energy_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQL:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EP, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_ENERGY_PARAM_LOOKUP_POINT_EPI && page_index <= GUI_ENERGY_PARAM_LOOKUP_POINT_EP)
+        {
+            oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EP, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_ENERGY_PARAM_LOOKUP_POINT_EQL && page_index <= GUI_ENERGY_PARAM_LOOKUP_POINT_EQ)
+        {
+            oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_energy_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void module_oled_display_energy_param_lookup_gui_r(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPI:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPE:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EP: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQL:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQC:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQ:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EP, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_ENERGY_PARAM_LOOKUP_POINT_EPI && page_index <= GUI_ENERGY_PARAM_LOOKUP_POINT_EP)
+        {
+            oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EP, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_ENERGY_PARAM_LOOKUP_POINT_EQL && page_index <= GUI_ENERGY_PARAM_LOOKUP_POINT_EQ)
+        {
+            oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_energy_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void module_oled_display_energy_param_lookup_gui_l(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPI:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EPE:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EP: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQL:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQC:
+    case GUI_ENERGY_PARAM_LOOKUP_POINT_EQ:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, OLED_WHITE_ON_BLACK);
+        module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EP, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_ENERGY_PARAM_LOOKUP_POINT_EPI && page_index <= GUI_ENERGY_PARAM_LOOKUP_POINT_EP)
+        {
+            oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); //   主菜单 >
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPI, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EPE, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EP, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_ENERGY_PARAM_LOOKUP_POINT_EQL && page_index <= GUI_ENERGY_PARAM_LOOKUP_POINT_EQ)
+        {
+            oled_display_title(GUI_TITLE_ENERGY_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK); // < 主菜单
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQL, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQC, OLED_WHITE_ON_BLACK);
+            module_oled_display_energy_param_lookup_gui_part(GUI_ENERGY_PARAM_LOOKUP_POINT_EQ, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_energy_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+/**
+  * @brief  电能参数显示部分内容
+  * @param  part 显示部分
+  * @param  clear 清除使能
+  * @retval None
+  */
+void module_oled_display_energy_param_gui_part(uint8_t part, uint8_t clear)
+{
+    switch(part)
+    {
+    case GUI_ENERGY_PARAM_POINT_EPI:
+        oled_display_L_energy(2, 1, gMeterEnergy.EPI[0], 0, clear);
+        oled_display_L_energy(4, 2, gMeterEnergy.EPI[1], 0, clear);
+        oled_display_L_energy(6, 3, gMeterEnergy.EPI[2], 0, clear);
+        break;
+
+    case GUI_ENERGY_PARAM_POINT_EPE:
+        oled_display_L_energy(2, 1, gMeterEnergy.EPE[0], 2, clear);
+        oled_display_L_energy(4, 2, gMeterEnergy.EPE[1], 2, clear);
+        oled_display_L_energy(6, 3, gMeterEnergy.EPE[2], 2, clear);
+        break;
+
+    case GUI_ENERGY_PARAM_POINT_EP:
+        oled_display_L_energy(2, 4, gMeterEnergy.EPI[3], 0, clear);
+        oled_display_L_energy(4, 4, gMeterEnergy.EPE[3], 2, clear);
+        break;
+
+    case GUI_ENERGY_PARAM_POINT_EQL:
+        oled_display_L_energy(2, 1, gMeterEnergy.EQL[0], 1, clear);
+        oled_display_L_energy(4, 2, gMeterEnergy.EQL[1], 1, clear);
+        oled_display_L_energy(6, 3, gMeterEnergy.EQL[2], 1, clear);
+        break;
+
+    case GUI_ENERGY_PARAM_POINT_EQC:
+        oled_display_L_energy(2, 1, gMeterEnergy.EQC[0], 3, clear);
+        oled_display_L_energy(4, 2, gMeterEnergy.EQC[1], 3, clear);
+        oled_display_L_energy(6, 3, gMeterEnergy.EQC[2], 3, clear);
+        break;
+
+    case GUI_ENERGY_PARAM_POINT_EQ:
+        oled_display_L_energy(2, 4, gMeterEnergy.EQL[3], 1, clear);
+        oled_display_L_energy(4, 4, gMeterEnergy.EQC[3], 3, clear);
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  电能参数显示
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_energy_param_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t clear;
+
+    if(gOledRunInfo.last_index >= GUI_ENERGY_PARAM_POINT_EPI && gOledRunInfo.last_index <= GUI_ENERGY_PARAM_POINT_EQ)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8);
+        clear = OLED_DISPLAY_KEEP;
+    }
+    else
+    {
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        clear = OLED_DISPLAY_CLEAR;
+    }
+
+    switch(page_index)
+    {
+    case GUI_ENERGY_PARAM_POINT_EPI:
+        oled_display_title(GUI_TITLE_ENERGY_PARAM, GUI_TITLE_HAVE_RIGHT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    case GUI_ENERGY_PARAM_POINT_EPE:
+    case GUI_ENERGY_PARAM_POINT_EP:
+    case GUI_ENERGY_PARAM_POINT_EQL:
+    case GUI_ENERGY_PARAM_POINT_EQC:
+        oled_display_title(GUI_TITLE_ENERGY_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    case GUI_ENERGY_PARAM_POINT_EQ:
+        oled_display_title(GUI_TITLE_ENERGY_PARAM, GUI_TITLE_HAVE_LEFT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    default:
+        break;
+    }
+
+    module_oled_display_energy_param_gui_part(page_index, OLED_DISPLAY_CLEAR);
+    gOledRunInfo.last_index = page_index;
+}
+
+#if PROD_TYPE == PROD_SFB || PROD_TYPE == PROD_SFE
+/**
+  * @brief  谐波查询显示部分内容
+  * @param  part 显示部分
+  * @param  colour 显示颜色
+  *            @arg OLED_BLACK_ON_WHITE: 白底黑字
+  *            @arg OLED_WHITE_ON_BLACK: 黑底白字
+  * @retval None
+  */
+void module_oled_display_harmonic_param_lookup_gui_part(uint8_t part, uint8_t colour)
+{
+    uint8_t x, y, index;
+
+    switch(part)
+    {
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"1. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jiao, colour);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"2. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_jiao, colour);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"3. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_XIANG, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_pian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_cha1, colour);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"4. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xlan, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_pian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_cha1, colour);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"5. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_pin, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_pian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_cha1, colour);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU:
+        x = 0;
+        y = 6;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"6. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ya, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ping, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_heng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_du, colour);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"7. ", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 24;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_dian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_liu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bu, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ping, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_heng, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_du, colour);
+        break;
+#if PROD_TYPE == PROD_SFE
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_U:
+        x = 0;
+        y = 2;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"1. U", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xie, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bo, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ji1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_I:
+        x = 0;
+        y = 4;
+        index = 0;
+        OLED_Fill_Part( colour == OLED_WHITE_ON_BLACK ? OLED_DISPLAY_FILL_BLACK : OLED_DISPLAY_FILL_WHILE, 0, 128, y, y + 2);
+        OLED_ShowStr(x, y, (uint8_t *)"2. I", OLED_CHAR_EN_SIZE_8x16, colour);
+        x = 32;
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_xie, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bo, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_ji1, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_bian, colour);
+        OLED_ShowCN(x + (16 * index++), y, OLED_CHAR_lv, colour);
+        break;
+#endif  
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  电能查询
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_harmonic_param_lookup_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI:
+        module_oled_display_harmonic_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF:
+        module_oled_display_harmonic_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI:
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_harmonic_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void module_oled_display_harmonic_param_lookup_gui_u(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI:
+        module_oled_display_harmonic_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF:
+        module_oled_display_harmonic_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL:
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_harmonic_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void module_oled_display_harmonic_param_lookup_gui_r(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI:
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_harmonic_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+
+void module_oled_display_harmonic_param_lookup_gui_l(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU: //主菜单第1页最后一行
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU:  //主菜单第2页最后一行
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, OLED_WHITE_ON_BLACK);
+        break;
+
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI:
+        oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_KEEP, OLED_WHITE_ON_BLACK);
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8); //下3行 清屏
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, OLED_WHITE_ON_BLACK);
+        module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, OLED_WHITE_ON_BLACK);
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgU, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_AgI, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvU, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvUL, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_DvF, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbU, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI)
+        {
+            oled_display_title(GUI_TITLE_XIANG_PARAM, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_ImbI, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_harmonic_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+#if PROD_TYPE == PROD_SFE
+void module_oled_display_harmonicUI_param_lookup_gui(uint8_t page_index, uint8_t key_val)
+{
+    switch(gOledRunInfo.last_index)
+    {
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_U:
+    case GUI_HARMONIC_PARAM_LOOKUP_POINT_I:
+        module_oled_display_harmonic_param_lookup_gui_part(gOledRunInfo.last_index, OLED_WHITE_ON_BLACK); //变为黑底白字
+        break;
+
+    default:
+        OLED_Fill(0); //清屏
+        if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_U && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_U)
+        {
+            oled_display_title(GUI_TITLE_HARMONIC_PARAM_LOOKUP, GUI_TITLE_HAVE_RIGHT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_U, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_I, OLED_WHITE_ON_BLACK);
+        }
+        else if(page_index >= GUI_HARMONIC_PARAM_LOOKUP_POINT_I && page_index <= GUI_HARMONIC_PARAM_LOOKUP_POINT_I)
+        {
+            oled_display_title(GUI_TITLE_HARMONIC_PARAM_LOOKUP, GUI_TITLE_HAVE_LEFT, OLED_DISPLAY_CLEAR, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_U, OLED_WHITE_ON_BLACK);
+            module_oled_display_harmonic_param_lookup_gui_part(GUI_HARMONIC_PARAM_LOOKUP_POINT_I, OLED_WHITE_ON_BLACK);
+        }
+        break;
+    }
+
+    module_oled_display_harmonic_param_lookup_gui_part(page_index, OLED_BLACK_ON_WHITE); //显示当前行
+
+    gOledRunInfo.last_index = page_index;
+}
+#endif 
+
+/**
+  * @brief  谐波参数显示部分内容
+  * @param  part 显示部分
+  * @param  clear 清除使能
+  * @retval None
+  */
+void module_oled_display_harmonic_param_gui_part(uint8_t part, uint8_t clear)
+{
+    switch(part)
+    {
+    case GUI_HARMONIC_PARAM_POINT_AgU:
+        oled_display_L_angle(2, 1, gPowerQualityParam.Volt_Angle[0], 0, clear);
+        oled_display_L_angle(4, 2, gPowerQualityParam.Volt_Angle[1], 0, clear);
+        oled_display_L_angle(6, 3, gPowerQualityParam.Volt_Angle[2], 0, clear);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_AgI:
+        oled_display_L_angle(2, 1, gPowerQualityParam.Curr_Angle[0], 1, clear);
+        oled_display_L_angle(4, 2, gPowerQualityParam.Curr_Angle[2], 1, clear);
+        oled_display_L_angle(6, 3, gPowerQualityParam.Curr_Angle[1], 1, clear);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_DvU:
+        oled_display_L_deviation(2, 1, gPowerQualityParam.Volt_Deviation[0], 0, clear);
+        oled_display_L_deviation(4, 2, gPowerQualityParam.Volt_Deviation[1], 0, clear);
+        oled_display_L_deviation(6, 3, gPowerQualityParam.Volt_Deviation[2], 0, clear);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_DvUL:
+        oled_display_L_deviation(2, 12, gPowerQualityParam.VoltL_Deviation[0], 0, clear);
+        oled_display_L_deviation(4, 23, gPowerQualityParam.VoltL_Deviation[1], 0, clear);
+        oled_display_L_deviation(6, 31, gPowerQualityParam.VoltL_Deviation[2], 0, clear);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_DvF:
+        oled_display_L_deviation(2, 0, gPowerQualityParam.Freq_Deviation, 1, clear);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_ImbU:
+        oled_display_L_imbalance(2, 2, gPowerQualityParam.Volt_Imbalance[1], 0, clear);
+        oled_display_L_imbalance(4, 0, gPowerQualityParam.Volt_Imbalance[0], 0, clear);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_ImbI:
+        oled_display_L_imbalance(2, 2, gPowerQualityParam.Curr_Imbalance[1], 1, clear);
+        oled_display_L_imbalance(4, 0, gPowerQualityParam.Curr_Imbalance[0], 1, clear);
+        break;
+#if PROD_TYPE == PROD_SFE
+    case GUI_HARMONIC_PARAM_POINT_U:
+        oled_display_L_harmonic(2, 1, gHarmonicParam.Volt_1[0], 0, clear);
+        oled_display_L_harmonic(4, 2, gHarmonicParam.Volt_1[1], 0, clear);
+        oled_display_L_harmonic(6, 3, gHarmonicParam.Volt_1[2], 0, clear);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_I:
+        oled_display_L_harmonic(2, 1, gHarmonicParam.Curr_1[0], 1, clear);
+        oled_display_L_harmonic(4, 2, gHarmonicParam.Curr_1[1], 1, clear);
+        oled_display_L_harmonic(6, 3, gHarmonicParam.Curr_1[2], 1, clear);
+        break;
+#endif
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  谐波参数显示
+  * @param  page_index 页面索引
+  * @param  key_val 按键值
+  * @retval None
+  */
+void module_oled_display_harmonic_param_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t clear;
+
+    if(gOledRunInfo.last_index >= GUI_HARMONIC_PARAM_POINT_AgU && gOledRunInfo.last_index <= GUI_HARMONIC_PARAM_POINT_ImbI)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8);
+        clear = OLED_DISPLAY_KEEP;
+    }
+    else
+    {
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        clear = OLED_DISPLAY_CLEAR;
+    }
+
+    switch(page_index)
+    {
+    case GUI_HARMONIC_PARAM_POINT_AgU:
+        oled_display_title(GUI_TITLE_XIANG_PARAM, GUI_TITLE_HAVE_RIGHT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_AgI:
+    case GUI_HARMONIC_PARAM_POINT_DvU:
+    case GUI_HARMONIC_PARAM_POINT_DvUL:
+    case GUI_HARMONIC_PARAM_POINT_DvF:
+    case GUI_HARMONIC_PARAM_POINT_ImbU:
+        oled_display_title(GUI_TITLE_XIANG_PARAM, GUI_TITLE_HAVE_LEFT_RIGHT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_ImbI:
+        oled_display_title(GUI_TITLE_XIANG_PARAM, GUI_TITLE_HAVE_LEFT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    default:
+        break;
+    }
+
+    module_oled_display_harmonic_param_gui_part(page_index, OLED_DISPLAY_CLEAR);
+    gOledRunInfo.last_index = page_index;
+}
+#if PROD_TYPE == PROD_SFE
+void module_oled_display_harmonicUI_param_gui(uint8_t page_index, uint8_t key_val)
+{
+    uint8_t clear;
+
+    if(gOledRunInfo.last_index >= GUI_HARMONIC_PARAM_POINT_U && gOledRunInfo.last_index <= GUI_HARMONIC_PARAM_POINT_I)
+    {
+        OLED_Fill_Part(OLED_DISPLAY_FILL_BLACK, 0, 128, 2, 8);
+        clear = OLED_DISPLAY_KEEP;
+    }
+    else
+    {
+        OLED_Fill(OLED_DISPLAY_FILL_BLACK); //清屏
+        clear = OLED_DISPLAY_CLEAR;
+    }
+
+    switch(page_index)
+    {
+    case GUI_HARMONIC_PARAM_POINT_U:
+        oled_display_title(GUI_TITLE_HARMONIC_PARAM, GUI_TITLE_HAVE_RIGHT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    case GUI_HARMONIC_PARAM_POINT_I:
+        oled_display_title(GUI_TITLE_HARMONIC_PARAM, GUI_TITLE_HAVE_LEFT, clear, OLED_BLACK_ON_WHITE);
+        break;
+
+    default:
+        break;
+    }
+
+    module_oled_display_harmonic_param_gui_part(page_index, OLED_DISPLAY_CLEAR);
+    gOledRunInfo.last_index = page_index;
+}
+#endif 
+#endif 
+
+/**
+  * @brief  确认键后存储数据
+  * @param  page_index 页面索引
+  * @retval None
+  */
+void module_oled_save_param_in_enter(uint8_t page_index)
+{
+    switch(page_index)
+    {
+    case GUI_CONFIG_CURRENT_THUP:
+        if(gTemp_config_param > 0xFFFF)
+        {
+            gTemp_config_param = 0xFFFF;
+        }
+        gFlashParam.st.Cur_THUp = gTemp_config_param;
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+        break;
+
+    case GUI_CONFIG_TEMP_THUP:
+        gFlashParam.st.Temp_THUp = gTemp_config_param;
+        Parameter_FlashWrite(PAR_SAVE_ADDR, &gFlashParam, sizeof(gFlashParam));
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
+  * @brief  参数刷新显示
+  * @param  None
+  * @retval None
+  */
+void module_oled_refresh_param_gui(void)
+{
+    static uint32_t mstick;
+    static uint32_t times;
+
+    if(HAL_GetTick() - mstick < TIME_REFRESH_TO_DISPLAY_GUI) //刷新时间未到
+    {
+        return;
+    }
+    mstick = HAL_GetTick();
+
+    if(gOledRunInfo.cur_index >= GUI_ELECTRIC_PARAM_POINT_U1_U2_U3 && gOledRunInfo.cur_index <= GUI_ELECTRIC_PARAM_POINT_T3_T4)
+    {
+        module_oled_display_electric_param_gui_part(gOledRunInfo.cur_index, OLED_DISPLAY_KEEP);
+        if(READ_BIT(gOledRunInfo.flag, OLED_FLAG_LOOP_PARAM))
+        {
+            if(times > TIME_REFRESH_TO_LOOP_DISPLAY_GUI) //是时候切换界面了
+            {
+                times = 0;
+                gOledRunInfo.cur_index = g_oled_display_table[gOledRunInfo.cur_index].next;
+                g_oled_display_table[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, NULL);
+            }
+            times++;
+        }
+    }
+    else if(gOledRunInfo.cur_index == GUI_ALARM_INFO)
+    {      
+            AlarmChange = 0;
+            module_oled_display_alarm_info_part();
+    } 
+    else if(gOledRunInfo.cur_index == GUI_COM_INFO)
+    {                                
+        module_oled_display_com_info_part();
+    }     
+}
+#endif /* PROD_TYPE == PROD_ESF */
+
+/**
+  * @brief button 1 Callback
+  * @retval None
+  */
+void btn_oled1_cb(flex_button_t *btn)
+{
+    switch(btn->event)
+    {
+    case FLEX_BTN_PRESS_DOWN:
+        LOGD(TAG, "Button 1 FLEX_BTN_PRESS_DOWN");
+        break;
+
+    case FLEX_BTN_PRESS_CLICK:
+        LOGD(TAG, "Button 1 FLEX_BTN_PRESS_CLICK");
+        btnow = 1;
+        gOledRunInfo.cur_index = g_oled_display_table_u[gOledRunInfo.cur_index].next;
+        g_oled_display_table_u[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    case FLEX_BTN_PRESS_DOUBLE_CLICK:
+        LOGD(TAG, "Button 1 FLEX_BTN_PRESS_DOUBLE_CLICK");
+        break;
+
+    case FLEX_BTN_PRESS_SHORT_START:
+        LOGD(TAG, "Button 1 FLEX_BTN_PRESS_SHORT_START");
+        gOledRunInfo.cur_index = g_oled_display_table_u[gOledRunInfo.cur_index].next;
+        g_oled_display_table_u[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    default:
+        LOGW(TAG, "Button 1 other btn->event: %d", btn->event);
+        break;
+    }
+}
+
+/**
+  * @brief button 2 Callback
+  * @retval None
+  */
+void btn_oled2_cb(flex_button_t *btn)
+{
+    switch(btn->event)
+    {
+    case FLEX_BTN_PRESS_DOWN:
+        LOGD(TAG, "Button 2 FLEX_BTN_PRESS_DOWN");
+        break;
+
+    case FLEX_BTN_PRESS_CLICK:
+        LOGD(TAG, "Button 2 FLEX_BTN_PRESS_CLICK");
+        btnow = 2;
+        gOledRunInfo.cur_index = g_oled_display_table_l[gOledRunInfo.cur_index].next;
+        g_oled_display_table_l[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    case FLEX_BTN_PRESS_DOUBLE_CLICK:
+        LOGD(TAG, "Button 2 FLEX_BTN_PRESS_DOUBLE_CLICK");
+        break;
+
+    case FLEX_BTN_PRESS_SHORT_START:
+        LOGD(TAG, "Button 2 FLEX_BTN_PRESS_SHORT_START");
+        gOledRunInfo.cur_index = g_oled_display_table_l[gOledRunInfo.cur_index].next;
+        g_oled_display_table_l[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    default:
+        LOGW(TAG, "Button 2 other btn->event: %d", btn->event);
+        break;
+    }
+}
+
+/**
+  * @brief button 3 Callback
+  * @retval None
+  */
+void btn_oled3_cb(flex_button_t *btn)
+{
+    CLEAR_BIT(gOledRunInfo.flag, OLED_FLAG_LOOP_PARAM); //确认键退出轮询显示
+
+    switch(btn->event)
+    {
+    case FLEX_BTN_PRESS_DOWN:
+        LOGD(TAG, "Button 3 FLEX_BTN_PRESS_DOWN");
+        break;
+
+    case FLEX_BTN_PRESS_CLICK:
+        LOGD(TAG, "Button 3 FLEX_BTN_PRESS_CLICK");
+        oled_save_param_in_enter(gOledRunInfo.cur_index);
+        gOledRunInfo.cur_index = g_oled_display_table[gOledRunInfo.cur_index].enter;
+        g_oled_display_table[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    case FLEX_BTN_PRESS_DOUBLE_CLICK:
+        LOGD(TAG, "Button 3 FLEX_BTN_PRESS_DOUBLE_CLICK");
+        break;
+
+    case FLEX_BTN_PRESS_SHORT_START:
+        LOGD(TAG, "Button 3 FLEX_BTN_PRESS_SHORT_START");
+        break;
+
+    default:
+        LOGW(TAG, "Button 3 other btn->event: %d", btn->event);
+        break;
+    }
+}
+
+/**
+  * @brief button 4 Callback
+  * @retval None
+  */
+void btn_oled4_cb(flex_button_t *btn)
+{
+    switch(btn->event)
+    {
+    case FLEX_BTN_PRESS_DOWN:
+        LOGD(TAG, "Button 4 FLEX_BTN_PRESS_DOWN");
+        break;
+
+    case FLEX_BTN_PRESS_CLICK:
+        LOGD(TAG, "Button 4 FLEX_BTN_PRESS_CLICK");
+        btnow = 4;
+        gOledRunInfo.cur_index = g_oled_display_table_r[gOledRunInfo.cur_index].next;
+        g_oled_display_table_r[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    case FLEX_BTN_PRESS_DOUBLE_CLICK:
+        LOGD(TAG, "Button 4 FLEX_BTN_PRESS_DOUBLE_CLICK");
+        break;
+
+    case FLEX_BTN_PRESS_SHORT_START:
+        LOGD(TAG, "Button 4 FLEX_BTN_PRESS_SHORT_START");
+        gOledRunInfo.cur_index = g_oled_display_table_r[gOledRunInfo.cur_index].next;
+        g_oled_display_table_r[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    default:
+        LOGW(TAG, "Button 4 other btn->event: %d", btn->event);
+        break;
+    }
+}
+
+/**
+  * @brief button 5 Callback
+  * @retval None
+  */
+void btn_oled5_cb(flex_button_t *btn)
+{
+    switch(btn->event)
+    {
+    case FLEX_BTN_PRESS_DOWN:
+        LOGD(TAG, "Button 5 FLEX_BTN_PRESS_DOWN");
+        break;
+
+    case FLEX_BTN_PRESS_CLICK:
+        LOGD(TAG, "Button 5 FLEX_BTN_PRESS_CLICK");
+        btnow = 5;
+        gOledRunInfo.cur_index = g_oled_display_table[gOledRunInfo.cur_index].next;
+        g_oled_display_table[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    case FLEX_BTN_PRESS_DOUBLE_CLICK:
+        LOGD(TAG, "Button 5 FLEX_BTN_PRESS_DOUBLE_CLICK");
+        break;
+
+    case FLEX_BTN_PRESS_SHORT_START:
+        LOGD(TAG, "Button 5 FLEX_BTN_PRESS_SHORT_START");
+        gOledRunInfo.cur_index = g_oled_display_table[gOledRunInfo.cur_index].next;
+        g_oled_display_table[gOledRunInfo.cur_index].current_operation(gOledRunInfo.cur_index, btn->event);
+        break;
+
+    default:
+        LOGW(TAG, "Button 5 other btn->event: %d", btn->event);
+        break;
+    }
+}
+
+/**
+  * @brief button 1 read Pin
+  * @retval None
+  */
+static uint8_t button_key1_read(void)
+{
+    return HAL_GPIO_ReadPin(KEY_1_GPIO_Port, KEY_1_Pin);
+}
+
+/**
+  * @brief button 2 read Pin
+  * @retval None
+  */
+static uint8_t button_key2_read(void)
+{
+    return HAL_GPIO_ReadPin(KEY_2_GPIO_Port, KEY_2_Pin);
+}
+
+/**
+  * @brief button 3 read Pin
+  * @retval None
+  */
+static uint8_t button_key3_read(void)
+{
+    return HAL_GPIO_ReadPin(KEY_3_GPIO_Port, KEY_3_Pin);
+}
+
+/**
+  * @brief button 4 read Pin
+  * @retval None
+  */
+static uint8_t button_key4_read(void)
+{
+    return HAL_GPIO_ReadPin(KEY_4_GPIO_Port, KEY_4_Pin);
+}
+
+/**
+  * @brief button 5 read Pin
+  * @retval None
+  */
+static uint8_t button_key5_read(void)
+{
+    return HAL_GPIO_ReadPin(KEY_5_GPIO_Port, KEY_5_Pin);
+}
+
+void iotb_oledkey_init(void)
+{
+    uint8_t i;
+
+    memset(&iotb_user_button[0], 0x0, sizeof(iotb_user_button));
+
+    iotb_user_button[USER_BUTTON_1].usr_button_read = button_key1_read;
+    iotb_user_button[USER_BUTTON_1].cb = (flex_button_response_callback)btn_oled1_cb;
+
+    iotb_user_button[USER_BUTTON_2].usr_button_read = button_key2_read;
+    iotb_user_button[USER_BUTTON_2].cb = (flex_button_response_callback)btn_oled2_cb;
+    
+    iotb_user_button[USER_BUTTON_3].usr_button_read = button_key3_read;
+    iotb_user_button[USER_BUTTON_3].cb = (flex_button_response_callback)btn_oled3_cb;
+
+    iotb_user_button[USER_BUTTON_4].usr_button_read = button_key4_read;
+    iotb_user_button[USER_BUTTON_4].cb = (flex_button_response_callback)btn_oled4_cb;
+
+    iotb_user_button[USER_BUTTON_5].usr_button_read = button_key5_read;
+    iotb_user_button[USER_BUTTON_5].cb = (flex_button_response_callback)btn_oled5_cb;
+
+    for (i = 0; i < USER_BUTTON_MAX; i ++)
+    {
+        iotb_user_button[i].status = 0;
+        iotb_user_button[i].pressed_logic_level = KEY_TURNON_LEVEL;
+
+        iotb_user_button[i].click_start_tick = 12;         //click press: keep time > click_start_tick * iotb_key_scan_cycle
+        iotb_user_button[i].short_press_start_tick = 60;   //short press: keep time > short_press_start_tick * iotb_key_scan_cycle
+        iotb_user_button[i].long_press_start_tick = 120;   //long press: keep time > long_press_start_tick * iotb_key_scan_cycle
+        iotb_user_button[i].long_hold_start_tick = 180;    //long hold: keep time > long_hold_start_tick * iotb_key_scan_cycle
+
+        flex_button_register(&iotb_user_button[i]);
+    }
+}
+
+/**
+  * @brief  新建按键线程（任务）
+  * @param  None
+  * @retval None
+  */
+void osThreadNew_keyOled(void)
+{
+    if(OLED_Init())
+    {
+        PAR_SET_BIT(gParam.st.State_SystemErr, SysErr0_Oled_Msk);
+        return;  //异常
+    }
+    PAR_CLEAR_BIT(gParam.st.State_SystemErr, SysErr0_Oled_Msk);
+    iotb_oledkey_init();
+
+    keyOledTaskHandle = osThreadNew(KeyOledTask, NULL, &keyOledTask_attributes);
+}
+
+/**
+  * @brief  Function implementing the keyOledTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+void KeyOledTask(void *argument)
+{
+    LOGD(TAG, "%s RUN. Free heap size is %d bytes", __func__, xPortGetFreeHeapSize());
+
+    gOledRunInfo.flag = 0;
+    gOledRunInfo.cur_index = GUI_START;
+    gOledRunInfo.last_index = GUI_START;
+
+    module_oled_display_start_gui(gOledRunInfo.cur_index, NULL);
+    osDelay(TIME_OUT_TO_DISPLAY_START_GUI);
+
+    gOledRunInfo.cur_index = GUI_COM_INFO;
+    module_oled_display_com_info(gOledRunInfo.cur_index, NULL);
+    
+//    gOledRunInfo.cur_index = GUI_ALARM_INFO;
+//    module_oled_display_alarm_info(gOledRunInfo.cur_index, NULL);
+    
+    for(;;)
+    {
+        if (iotb_button_scan_enable)
+        {
+            flex_button_scan();
+        }
+        osDelay(key_scan_cycle);
+
+        module_oled_refresh_param_gui();
+        
+        if(masterTOalarm == 1)
+        {
+            if(is_alarm1_trig() || is_alarm2_trig() || is_alarm3_trig())
+            {
+                kalyke_alarm_post_master();
+            }
+#if PROD_TYPE == PROD_SFE 
+						if(is_alarm4_trig())
+						{
+								kalyke_alarm_post_master_SC_EA_VC();
+						}
+#endif
+        }
+    }
+}
+
+#endif
+
+
+#endif
+
+
