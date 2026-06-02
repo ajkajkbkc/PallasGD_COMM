@@ -187,6 +187,9 @@
     
     Vi=0.33V, Ib=1000A
     N = 1200*0.33/1000 = 0.396    
+
+    Vi=0.33V, Ib=800A
+    N = 1200*0.33/800 = 0.495    
    --------------------------------------------------------------------- */
 #define N_Ib5A_Vi330mV             (79.2)
 #define N_Ib100A_Vi330mV           (3.96)
@@ -194,6 +197,13 @@
 #define N_Ib600A_Vi330mV           (0.66)
 #define N_Ib200A_Vi330mV           (1.98)
 #define N_Ib1000A_Vi330mV          (0.396)
+#define N_Ib700A_Vi330mV           (0.566)
+#define N_Ib300A_Vi330mV           (1.32)
+#define N_Ib120A_Vi330mV           (3.3)
+#define N_Ib60A_Vi330mV            (6.6)
+#define N_Ib1300A_Vi330mV          (0.305)
+#define N_Ib1500A_Vi330mV          (0.264)
+#define N_Ib800A_Vi330mV           (0.495)
 /* ---------------------------------------------------------------------
     EC电表脉冲常数:
 
@@ -215,6 +225,13 @@
 #define EC_Ib600A                  (60)
 #define EC_Ib200A                  (300)
 #define EC_Ib1000A                 (40)
+#define EC_Ib700A                  (50)
+#define EC_Ib300A                  (120)
+#define EC_Ib120A                  (300)
+#define EC_Ib60A                   (600)
+#define EC_Ib1300A                 (30)
+#define EC_Ib1500A                 (20)
+#define EC_Ib800A                  (50)
 /* ---------------------------------------------------------------------
     HFconst高频脉冲常数:
     G=1.163, Vu=0.264V, Vi=0.33V, Un=220V
@@ -249,6 +266,10 @@
     EC=40imp/kWh,  Ib=1000A:
     Femu = 921.6kHz:  HFconst = INT[35058588480*0.264*0.33/(40*220*1000)] = INT[347.08] = 0x015B
     Femu = 1.8432MHz: HFconst = INT[70117176960*0.264*0.33/(40*220*1000)] = INT[694.16] = 0x02B6
+
+    EC=50imp/kWh,  Ib=800A:
+    Femu = 921.6kHz:  HFconst = INT[35058588480*0.264*0.33/(50*220*800)] = INT[347.08] = 0x015B
+    Femu = 1.8432MHz: HFconst = INT[70117176960*0.264*0.33/(50*220*800)] = INT[694.16] = 0x02B6
    --------------------------------------------------------------------- */
 #if EMU_FREQ == 0
 #define HFconst_EC6400_Ib5A       (0x01B1)
@@ -263,6 +284,13 @@
 #define HFconst_EC60_Ib600A       (0x0303)
 #define HFconst_EC300_Ib200A      (0x01CE)
 #define HFconst_EC40_Ib1000A      (0x02B6)
+#define HFconst_EC50_Ib700A       (0x0319)
+#define HFconst_EC120_Ib300A      (0x0303)
+#define HFconst_EC300_Ib120A      (0x0303)
+#define HFconst_EC600_Ib60A       (0x0303)
+#define HFconst_EC30_Ib1300A      (0x02C8)
+#define HFconst_EC20_Ib1500A      (0x039D)
+#define HFconst_EC20_Ib800A       (0x02B6)
 #endif
 
 /* ---------------------------------------------------------------------
@@ -293,6 +321,10 @@
     EC=40imp/kWh,  HFconst=347:
     Femu = 921.6kHz:  K = 2.592*10^10/(347*40*2^23)  = 0.2226
     Femu = 1.8432MHz: K = 5.184*10^10/(694*40*2^23)  = 0.2226
+
+    EC=50imp/kWh,  HFconst=347:
+    Femu = 921.6kHz:  K = 2.592*10^10/(347*50*2^23)  = 0.1781
+    Femu = 1.8432MHz: K = 5.184*10^10/(694*50*2^23)  = 0.1781
    --------------------------------------------------------------------- */
 #if EMU_FREQ == 0
 #define K_EC6400_Ib5A              (0.00112)
@@ -306,6 +338,13 @@
 #define K_EC60_Ib600A              (0.13361)
 #define K_EC300_Ib200A             (0.06688)
 #define K_EC40_Ib1000A             (0.2226)
+#define K_EC50_Ib700A              (0.1560)
+#define K_EC120_Ib300A             (0.0668)
+#define K_EC300_Ib120A             (0.0267)
+#define K_EC600_Ib60A              (0.01336)
+#define K_EC30_Ib1300A             (0.28952)
+#define K_EC20_Ib1500A             (0.334)
+#define K_EC20_Ib800A              (0.1781)
 #endif
 
 
@@ -345,7 +384,14 @@
 #define REG_Pstartup_Ib400A       (0x0250)
 #define REG_Pstartup_Ib600A       (0x0250)
 #define REG_Pstartup_Ib200A       (0x0250)
-#define REG_Pstartup_Ib1000A       (0x0250)
+#define REG_Pstartup_Ib1000A      (0x0250)
+#define REG_Pstartup_Ib700A       (0x0250)
+#define REG_Pstartup_Ib300A       (0x0250)
+#define REG_Pstartup_Ib120A       (0x0250)
+#define REG_Pstartup_Ib60A        (0x0250)
+#define REG_Pstartup_Ib1300A      (0x0250)
+#define REG_Pstartup_Ib1500A      (0x0250)
+#define REG_Pstartup_Ib800A      (0x0250)
 #endif
 
 
@@ -358,6 +404,13 @@
 #define ESE_MINIMUM_CUR_Ib600A    (0.600)      //
 #define ESE_MINIMUM_CUR_Ib200A    (0.200)      //
 #define ESE_MINIMUM_CUR_Ib1000A   (1.000)      //
+#define ESE_MINIMUM_CUR_Ib700A    (0.700)      //
+#define ESE_MINIMUM_CUR_Ib300A    (0.300)      //
+#define ESE_MINIMUM_CUR_Ib120A    (0.120)      //
+#define ESE_MINIMUM_CUR_Ib60A     (0.060)      //
+#define ESE_MINIMUM_CUR_Ib1300A   (1.300)      //
+#define ESE_MINIMUM_CUR_Ib1500A   (1.500)      //
+#define ESE_MINIMUM_CUR_Ib800A    (0.800)      //
 
 #define ESE_MINIMUM_POW_Ib5A      (1.100)      //Ib=5A, 0.1%Ib*Ub
 #define ESE_MINIMUM_POW_Ib100A    (22.00)      //
@@ -365,6 +418,13 @@
 #define ESE_MINIMUM_POW_Ib600A    (132.0)      //
 #define ESE_MINIMUM_POW_Ib200A    (44.0)       //
 #define ESE_MINIMUM_POW_Ib1000A   (220.00)      //
+#define ESE_MINIMUM_POW_Ib700A    (154.00)      //
+#define ESE_MINIMUM_POW_Ib300A    (66.00)      //
+#define ESE_MINIMUM_POW_Ib120A    (26.40)      //
+#define ESE_MINIMUM_POW_Ib60A     (13.20)       //
+#define ESE_MINIMUM_POW_Ib1300A   (286.00)     //
+#define ESE_MINIMUM_POW_Ib1500A   (330.00)     //
+#define ESE_MINIMUM_POW_Ib800A    (176.00)     //
 
 #if PROD_TYPE == PROD_ESP
 #define ESE_STARTUP_VOL           (0.0)        //ESP启动电压
@@ -381,6 +441,13 @@
 #define ESE_CALI_CUR_Ib600A       (600.0)      //默认校准电流A
 #define ESE_CALI_CUR_Ib200A       (200.0)      //默认校准电流A
 #define ESE_CALI_CUR_Ib1000A      (1000.0)      //默认校准电流A
+#define ESE_CALI_CUR_Ib700A       (700.0)        //默认校准电流A
+#define ESE_CALI_CUR_Ib300A       (300.0)      //默认校准电流A
+#define ESE_CALI_CUR_Ib120A       (120.0)      //默认校准电流A
+#define ESE_CALI_CUR_Ib60A        (60.0)      //默认校准电流A
+#define ESE_CALI_CUR_Ib1300A      (1300.0)      //默认校准电流A
+#define ESE_CALI_CUR_Ib1500A      (1500.0)      //默认校准电流A
+#define ESE_CALI_CUR_Ib800A       (800.0)      //默认校准电流A
 
 #define ESE_CALI_POW_Ib5A         (500.0)      //默认校准功率W
 #define ESE_CALI_POW_Ib100A       (500.0)      //默认校准功率W
@@ -388,6 +455,13 @@
 #define ESE_CALI_POW_Ib600A       (500.0)      //默认校准功率W
 #define ESE_CALI_POW_Ib200A       (500.0)      //默认校准功率W
 #define ESE_CALI_POW_Ib1000A      (500.0)      //默认校准功率W
+#define ESE_CALI_POW_Ib700A       (500.0)      //默认校准功率W
+#define ESE_CALI_POW_Ib300A       (500.0)      //默认校准功率W
+#define ESE_CALI_POW_Ib120A       (500.0)      //默认校准功率W
+#define ESE_CALI_POW_Ib60A        (500.0)      //默认校准功率W
+#define ESE_CALI_POW_Ib1300A      (500.0)      //默认校准功率W
+#define ESE_CALI_POW_Ib1500A      (500.0)      //默认校准功率W
+#define ESE_CALI_POW_Ib800A      (500.0)      //默认校准功率W
 
 #define ESE_CALI_VOL              (220.0)      //默认校准电压V
 

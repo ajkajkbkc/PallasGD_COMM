@@ -581,6 +581,27 @@ void flashparam_init(void)
 #elif   PARAM_TYPE == PARAM_SFE6
             gFlashParam.st.Prod_Param |= PARAM_SFE6;
             memcpy(gFlashParam.st.idInfo, "KSDSFE6250515001,/SFE6", 22);
+#elif   PARAM_TYPE == PARAM_SFE7
+            gFlashParam.st.Prod_Param |= PARAM_SFE7;
+            memcpy(gFlashParam.st.idInfo, "KSDSFE7251101001,/SFE7", 22);
+#elif   PARAM_TYPE == PARAM_SFE8
+            gFlashParam.st.Prod_Param |= PARAM_SFE8;
+            memcpy(gFlashParam.st.idInfo, "KSDSFE8251101001,/SFE8", 22);
+#elif   PARAM_TYPE == PARAM_SFE9
+            gFlashParam.st.Prod_Param |= PARAM_SFE9;
+            memcpy(gFlashParam.st.idInfo, "KSDSFE9251101001,/SFE9", 22);
+#elif   PARAM_TYPE == PARAM_SFEA
+            gFlashParam.st.Prod_Param |= PARAM_SFEA;
+            memcpy(gFlashParam.st.idInfo, "KSDSFEA251101001,/SFEA", 22);
+#elif   PARAM_TYPE == PARAM_SFEB
+            gFlashParam.st.Prod_Param |= PARAM_SFEB;
+            memcpy(gFlashParam.st.idInfo, "KSDSFEB251101001,/SFEB", 22);
+#elif   PARAM_TYPE == PARAM_SFEC
+            gFlashParam.st.Prod_Param |= PARAM_SFEC;
+            memcpy(gFlashParam.st.idInfo, "KSDSFEC251101001,/SFEC", 22);
+#elif   PARAM_TYPE == PARAM_SFED
+            gFlashParam.st.Prod_Param |= PARAM_SFED;
+            memcpy(gFlashParam.st.idInfo, "KSDSFED251101001,/SFED", 22);
 #elif   PARAM_TYPE == PARAM_SFB1
             gFlashParam.st.Prod_Param |= PARAM_SFB1;
             memcpy(gFlashParam.st.idInfo, "KSDSFB1250515001,/SFB1", 22);
@@ -599,6 +620,27 @@ void flashparam_init(void)
 #elif   PARAM_TYPE == PARAM_SFB6
             gFlashParam.st.Prod_Param |= PARAM_SFB6;
             memcpy(gFlashParam.st.idInfo, "KSDSFB6250515001,/SFB6", 22);
+#elif   PARAM_TYPE == PARAM_SFB7
+            gFlashParam.st.Prod_Param |= PARAM_SFB7;
+            memcpy(gFlashParam.st.idInfo, "KSDSFB7251101001,/SFB7", 22);
+#elif   PARAM_TYPE == PARAM_SFB8
+            gFlashParam.st.Prod_Param |= PARAM_SFB8;
+            memcpy(gFlashParam.st.idInfo, "KSDSFB8251101001,/SFB8", 22);
+#elif   PARAM_TYPE == PARAM_SFB9
+            gFlashParam.st.Prod_Param |= PARAM_SFB9;
+            memcpy(gFlashParam.st.idInfo, "KSDSFB9251101001,/SFB9", 22);
+#elif   PARAM_TYPE == PARAM_SFBA
+            gFlashParam.st.Prod_Param |= PARAM_SFBA;
+            memcpy(gFlashParam.st.idInfo, "KSDSFBA251101001,/SFBA", 22);
+#elif   PARAM_TYPE == PARAM_SFBB
+            gFlashParam.st.Prod_Param |= PARAM_SFBB;
+            memcpy(gFlashParam.st.idInfo, "KSDSFBB251101001,/SFBB", 22);
+#elif   PARAM_TYPE == PARAM_SFBC
+            gFlashParam.st.Prod_Param |= PARAM_SFBC;
+            memcpy(gFlashParam.st.idInfo, "KSDSFBC251101001,/SFBC", 22);
+#elif   PARAM_TYPE == PARAM_SFBD
+            gFlashParam.st.Prod_Param |= PARAM_SFBD;
+            memcpy(gFlashParam.st.idInfo, "KSDSFBD251101001,/SFBD", 22);
 #elif   PARAM_TYPE == PARAM_SFA1
             gFlashParam.st.Prod_Param |= PARAM_SFA1;
             memcpy(gFlashParam.st.idInfo, "KSDSFA1250515001,/SFA1", 22);
@@ -616,7 +658,28 @@ void flashparam_init(void)
             memcpy(gFlashParam.st.idInfo, "KSDSFA5250515001,/SFA5", 22);
 #elif   PARAM_TYPE == PARAM_SFA6
             gFlashParam.st.Prod_Param |= PARAM_SFA6;
-            memcpy(gFlashParam.st.idInfo, "KSDSFA6250515001,/SFA6", 22);            
+            memcpy(gFlashParam.st.idInfo, "KSDSFA6250515001,/SFA6", 22); 
+#elif   PARAM_TYPE == PARAM_SFA7
+            gFlashParam.st.Prod_Param |= PARAM_SFA7;
+            memcpy(gFlashParam.st.idInfo, "KSDSFA7251101001,/SFA7", 22); 
+#elif   PARAM_TYPE == PARAM_SFA8
+            gFlashParam.st.Prod_Param |= PARAM_SFA8;
+            memcpy(gFlashParam.st.idInfo, "KSDSFA8251101001,/SFA8", 22);
+#elif   PARAM_TYPE == PARAM_SFA9
+            gFlashParam.st.Prod_Param |= PARAM_SFA9;
+            memcpy(gFlashParam.st.idInfo, "KSDSFA9251101001,/SFA9", 22);
+#elif   PARAM_TYPE == PARAM_SFAA
+            gFlashParam.st.Prod_Param |= PARAM_SFAA;
+            memcpy(gFlashParam.st.idInfo, "KSDSFAA251101001,/SFAA", 22);
+#elif   PARAM_TYPE == PARAM_SFAB
+            gFlashParam.st.Prod_Param |= PARAM_SFAB;
+            memcpy(gFlashParam.st.idInfo, "KSDSFAB251101001,/SFAB", 22);
+#elif   PARAM_TYPE == PARAM_SFAC
+            gFlashParam.st.Prod_Param |= PARAM_SFAC;
+            memcpy(gFlashParam.st.idInfo, "KSDSFAC251101001,/SFAC", 22);
+#elif   PARAM_TYPE == PARAM_SFAD
+            gFlashParam.st.Prod_Param |= PARAM_SFAD;
+            memcpy(gFlashParam.st.idInfo, "KSDSFAD251101001,/SFAD", 22);
 #endif
         }
         else  //ª÷∏¥≥ˆ≥ß…Ë÷√
@@ -645,6 +708,34 @@ void flashparam_init(void)
             {
                 memcpy(&gFlashParam.st.idInfo[3], "SFA6", 4);
             }
+            else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA7 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFA7", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA8 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFA8", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA9 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFA9", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAA )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFAA", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAB )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFAB", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAC )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFAC", 4);
+            }
+            else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAD )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFAD", 4);
+            }
             else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB1 )
             {
                 memcpy(&gFlashParam.st.idInfo[3], "SFB1", 4);
@@ -668,6 +759,34 @@ void flashparam_init(void)
             else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB6 )
             {
                 memcpy(&gFlashParam.st.idInfo[3], "SFB6", 4);
+            }
+            else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB7 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFB7", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB8 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFB8", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB9 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFB9", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBA )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFBA", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBB )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFBB", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBC )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFBC", 4);
+            }
+            else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBD )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFBD", 4);
             }
             else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE1 )
             {
@@ -693,7 +812,34 @@ void flashparam_init(void)
             {
                 memcpy(&gFlashParam.st.idInfo[3], "SFE6", 4);
             }
-
+            else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE7 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFE7", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE8 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFE8", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE9 )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFE9", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEA )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFEA", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEB )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFEB", 4);
+            }
+			else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEC )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFEC", 4);
+            }
+            else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFED )
+            {
+                memcpy(&gFlashParam.st.idInfo[3], "SFED", 4);
+            }
             else
             {
                 memcpy(&gFlashParam.st.idInfo[3], "ERR0", 4);
@@ -965,6 +1111,104 @@ else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA5 || (gFlashParam.st.
     gFlashParam.st.fPow_THUp = 396000.0;
     gFlashParam.st.fPow_THDown = 0.0;
 }
+else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA7 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB7 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE7)
+{
+        gFlashParam.st.EC = EC_Ib700A;
+		gFlashParam.st.N_Ib_Vi[0] = N_Ib700A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[1] = N_Ib700A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[2] = N_Ib700A_Vi330mV;
+		gFlashParam.st.K_Pow = K_EC50_Ib700A;
+		gFlashParam.st.Cur_Minimun = ESE_MINIMUM_CUR_Ib700A;
+		gFlashParam.st.Pow_Minimun = ESE_MINIMUM_POW_Ib700A;
+		gFlashParam.st.fCur_THUp = 700.0;
+		gFlashParam.st.fCur_THDown = 0.0;
+		gFlashParam.st.fPow_THUp = 462000.0;
+		gFlashParam.st.fPow_THDown = 0.0;
+}
+else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA8 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB8 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE8)
+{
+        gFlashParam.st.EC = EC_Ib300A;
+		gFlashParam.st.N_Ib_Vi[0] = N_Ib300A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[1] = N_Ib300A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[2] = N_Ib300A_Vi330mV;
+		gFlashParam.st.K_Pow = K_EC120_Ib300A;
+		gFlashParam.st.Cur_Minimun = ESE_MINIMUM_CUR_Ib300A;
+		gFlashParam.st.Pow_Minimun = ESE_MINIMUM_POW_Ib300A;
+		gFlashParam.st.fCur_THUp = 300.0;
+		gFlashParam.st.fCur_THDown = 0.0;
+		gFlashParam.st.fPow_THUp = 198000.0;
+		gFlashParam.st.fPow_THDown = 0.0;
+}
+else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA9 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB9 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE9)
+{
+        gFlashParam.st.EC = EC_Ib120A;
+		gFlashParam.st.N_Ib_Vi[0] = N_Ib120A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[1] = N_Ib120A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[2] = N_Ib120A_Vi330mV;
+		gFlashParam.st.K_Pow = K_EC300_Ib120A;
+		gFlashParam.st.Cur_Minimun = ESE_MINIMUM_CUR_Ib120A;
+		gFlashParam.st.Pow_Minimun = ESE_MINIMUM_POW_Ib120A;
+		gFlashParam.st.fCur_THUp = 120.0;
+		gFlashParam.st.fCur_THDown = 0.0;
+		gFlashParam.st.fPow_THUp = 79200.0;
+		gFlashParam.st.fPow_THDown = 0.0;
+}
+else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAA || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBA || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEA)
+{
+        gFlashParam.st.EC = EC_Ib60A;
+		gFlashParam.st.N_Ib_Vi[0] = N_Ib60A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[1] = N_Ib60A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[2] = N_Ib60A_Vi330mV;
+		gFlashParam.st.K_Pow = K_EC600_Ib60A;
+		gFlashParam.st.Cur_Minimun = ESE_MINIMUM_CUR_Ib60A;
+		gFlashParam.st.Pow_Minimun = ESE_MINIMUM_POW_Ib60A;
+		gFlashParam.st.fCur_THUp = 60.0;
+		gFlashParam.st.fCur_THDown = 0.0;
+		gFlashParam.st.fPow_THUp = 39600.0;
+		gFlashParam.st.fPow_THDown = 0.0;
+}
+else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAB || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBB || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEB)
+{
+        gFlashParam.st.EC = EC_Ib1300A;
+		gFlashParam.st.N_Ib_Vi[0] = N_Ib1300A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[1] = N_Ib1300A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[2] = N_Ib1300A_Vi330mV;
+		gFlashParam.st.K_Pow = K_EC30_Ib1300A;
+		gFlashParam.st.Cur_Minimun = ESE_MINIMUM_CUR_Ib1300A;
+		gFlashParam.st.Pow_Minimun = ESE_MINIMUM_POW_Ib1300A;
+		gFlashParam.st.fCur_THUp = 1300.0;
+		gFlashParam.st.fCur_THDown = 0.0;
+		gFlashParam.st.fPow_THUp = 858000.0;
+		gFlashParam.st.fPow_THDown = 0.0;
+}
+else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAC || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBC || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEC)
+{
+        gFlashParam.st.EC = EC_Ib1500A;
+		gFlashParam.st.N_Ib_Vi[0] = N_Ib1500A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[1] = N_Ib1500A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[2] = N_Ib1500A_Vi330mV;
+		gFlashParam.st.K_Pow = K_EC20_Ib1500A;
+		gFlashParam.st.Cur_Minimun = ESE_MINIMUM_CUR_Ib1500A;
+		gFlashParam.st.Pow_Minimun = ESE_MINIMUM_POW_Ib1500A;
+		gFlashParam.st.fCur_THUp = 1500.0;
+		gFlashParam.st.fCur_THDown = 0.0;
+		gFlashParam.st.fPow_THUp = 990000.0;
+		gFlashParam.st.fPow_THDown = 0.0;
+}
+else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAD || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBD || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFED)
+{
+        gFlashParam.st.EC = EC_Ib800A;
+		gFlashParam.st.N_Ib_Vi[0] = N_Ib800A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[1] = N_Ib800A_Vi330mV;
+		gFlashParam.st.N_Ib_Vi[2] = N_Ib800A_Vi330mV;
+		gFlashParam.st.K_Pow = K_EC20_Ib800A;
+		gFlashParam.st.Cur_Minimun = ESE_MINIMUM_CUR_Ib800A;
+		gFlashParam.st.Pow_Minimun = ESE_MINIMUM_POW_Ib800A;
+		gFlashParam.st.fCur_THUp = 800.0;
+		gFlashParam.st.fCur_THDown = 0.0;
+		gFlashParam.st.fPow_THUp = 528000.0;
+		gFlashParam.st.fPow_THDown = 0.0;
+}
 else
 {
     gFlashParam.st.EC = EC_Ib1000A;
@@ -1212,6 +1456,34 @@ else
     {
         memcpy(&gFlashParam.st.idInfo[16], ",/SFA6", 6);
     }
+    else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA7 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFA7", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA8 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFA8", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA9 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFA9", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAA )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFAA", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAB )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFAB", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAC )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFAC", 6);
+    }
+    else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAD )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFAD", 6);
+    }
     else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB1 )
     {
         memcpy(&gFlashParam.st.idInfo[16], ",/SFB1", 6);
@@ -1236,6 +1508,34 @@ else
     {
         memcpy(&gFlashParam.st.idInfo[16], ",/SFB6", 6);
     }
+    else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB7 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFB7", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB8 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFB8", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB9 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFB9", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBA )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFBA", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBB )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFBB", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBC )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFBC", 6);
+    }
+    else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBD )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFBD", 6);
+    }
     else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE1 )
     {
         memcpy(&gFlashParam.st.idInfo[16], ",/SFE1", 6);
@@ -1259,6 +1559,34 @@ else
     else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE6 )
     {
         memcpy(&gFlashParam.st.idInfo[16], ",/SFE6", 6);
+    }
+    else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE7 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFE7", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE8 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFE8", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE9 )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFE9", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEA )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFEA", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEB )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFEB", 6);
+    }
+	else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEC )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFEC", 6);
+    }
+    else if( (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFED )
+    {
+        memcpy(&gFlashParam.st.idInfo[16], ",/SFED", 6);
     }
     else
     {
@@ -1359,6 +1687,41 @@ void param_init(void)
     {
         gParam.st.fCali_Cur = ESE_CALI_CUR_Ib600A;
         gParam.st.fCali_Pow = ESE_CALI_POW_Ib600A;
+    }
+    else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA7 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB7 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE7)
+    {
+				gParam.st.fCali_Cur = ESE_CALI_CUR_Ib700A;
+        gParam.st.fCali_Pow = ESE_CALI_POW_Ib700A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA8 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB8 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE8)
+    {
+				gParam.st.fCali_Cur = ESE_CALI_CUR_Ib300A;
+        gParam.st.fCali_Pow = ESE_CALI_POW_Ib300A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA9 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB9 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE9)
+    {
+				gParam.st.fCali_Cur = ESE_CALI_CUR_Ib120A;
+        gParam.st.fCali_Pow = ESE_CALI_POW_Ib120A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAA || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBA || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEA)
+    {
+				gParam.st.fCali_Cur = ESE_CALI_CUR_Ib60A;
+        gParam.st.fCali_Pow = ESE_CALI_POW_Ib60A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAB || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBB || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEB)
+    {
+				gParam.st.fCali_Cur = ESE_CALI_CUR_Ib1300A;
+        gParam.st.fCali_Pow = ESE_CALI_POW_Ib1300A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAC || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBC || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEC)
+    {
+				gParam.st.fCali_Cur = ESE_CALI_CUR_Ib1500A;
+        gParam.st.fCali_Pow = ESE_CALI_POW_Ib1500A;
+    }
+    else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAD || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBD || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFED)
+    {
+				gParam.st.fCali_Cur = ESE_CALI_CUR_Ib800A;
+        gParam.st.fCali_Pow = ESE_CALI_POW_Ib800A;
     }
     else
     {

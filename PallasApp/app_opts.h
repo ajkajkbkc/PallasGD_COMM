@@ -11,14 +11,6 @@
 /* Private defines -----------------------------------------------------------*/
 /* --------------------- ① 产品系列 --------------------------- */
 #define PROD_XX                       0xFF00
-#define PROD_FG                       0x0100
-#define PROD_FS                       0x0200
-#define PROD_FR                       0x0300
-#define PROD_FL                       0x0400
-#define PROD_FD                       0x0500
-#define PROD_FA                       0x0600
-#define PROD_FSS                      0x0700
-#define PROD_SFC                      0x0800
 #define PROD_SFE                      0x0900
 #define PROD_SFB                      0x0A00
 #define PROD_SFA                      0x0B00
@@ -43,6 +35,27 @@
 #define PARAM_SFE4                    0x0010
 #define PARAM_SFE5                    0x0011
 #define PARAM_SFE6                    0x0012
+#define PARAM_SFE7                    0x0013 //700A
+#define PARAM_SFB7                    0x0014
+#define PARAM_SFA7                    0x0015
+#define PARAM_SFE8                    0x0016 //300A
+#define PARAM_SFB8                    0x0017
+#define PARAM_SFA8                    0x0018
+#define PARAM_SFE9                    0x0019 //120A
+#define PARAM_SFB9                    0x001A
+#define PARAM_SFA9                    0x001B
+#define PARAM_SFEA                    0x001C //60A
+#define PARAM_SFBA                    0x001D
+#define PARAM_SFAA                    0x001E
+#define PARAM_SFEB                    0x001F //1300A
+#define PARAM_SFBB                    0x0020
+#define PARAM_SFAB                    0x0021
+#define PARAM_SFEC                    0x0022 //1500A
+#define PARAM_SFBC                    0x0023
+#define PARAM_SFAC                    0x0024
+#define PARAM_SFED                    0x0025 //800A
+#define PARAM_SFBD                    0x0026
+#define PARAM_SFAD                    0x0027
 
 /* --------------------- ③ 通讯协议 --------------------------- */
 #define PROTOCOL_XX                   0xFFFF
@@ -111,7 +124,7 @@
     */
 /* ---------------------- 选择产品 --------------------------- */
 /*configTOTAL_HEAP_SIZE  PARAM_SFA: 46500   PARAM_SFB: 42600   PARAM_SFE: 41500 */
-#define PARAM_TYPE                    (PARAM_SFA1)
+#define PARAM_TYPE                    (PARAM_SFED)
 #define PROTOCOL_TYPE                 (PROTOCOL_MB | PROTOCOL_MBTCP | PROTOCOL_FLKMQTT)  //(PROTOCOL_MB | PROTOCOL_MBTCP | PROTOCOL_FLKMQTT | XX |...)
 /* ----------------------------------------------------------- */
 
@@ -159,13 +172,11 @@
 #define PROD_TYPE                     (PROD_FA)
 #elif PARAM_TYPE == PARAM_LDA1
 #define PROD_TYPE                     (PROD_FD)
-#elif PARAM_TYPE == PARAM_DEM2 || PARAM_TYPE == PARAM_DEM4 || PARAM_TYPE == PARAM_DEA2 || PARAM_TYPE == PARAM_DEA4
-#define PROD_TYPE                     (PROD_FSS)
-#elif PARAM_TYPE == PARAM_SFE1 || PARAM_TYPE == PARAM_SFE2 || PARAM_TYPE == PARAM_SFE3 || PARAM_TYPE == PARAM_SFE4 || PARAM_TYPE == PARAM_SFE5 || PARAM_TYPE == PARAM_SFE6
+#elif PARAM_TYPE == PARAM_SFE1 || PARAM_TYPE == PARAM_SFE2 || PARAM_TYPE == PARAM_SFE3 || PARAM_TYPE == PARAM_SFE4 || PARAM_TYPE == PARAM_SFE5 || PARAM_TYPE == PARAM_SFE6 || PARAM_TYPE == PARAM_SFE7 || PARAM_TYPE == PARAM_SFE8 || PARAM_TYPE == PARAM_SFE9 || PARAM_TYPE == PARAM_SFEA || PARAM_TYPE == PARAM_SFEB || PARAM_TYPE == PARAM_SFEC || PARAM_TYPE == PARAM_SFED
 #define PROD_TYPE                     (PROD_SFE)
-#elif PARAM_TYPE == PARAM_SFB1 || PARAM_TYPE == PARAM_SFB2 || PARAM_TYPE == PARAM_SFB3 || PARAM_TYPE == PARAM_SFB4 || PARAM_TYPE == PARAM_SFB5 || PARAM_TYPE == PARAM_SFB6
+#elif PARAM_TYPE == PARAM_SFB1 || PARAM_TYPE == PARAM_SFB2 || PARAM_TYPE == PARAM_SFB3 || PARAM_TYPE == PARAM_SFB4 || PARAM_TYPE == PARAM_SFB5 || PARAM_TYPE == PARAM_SFB6 || PARAM_TYPE == PARAM_SFB7 || PARAM_TYPE == PARAM_SFB8 || PARAM_TYPE == PARAM_SFB9 || PARAM_TYPE == PARAM_SFBA || PARAM_TYPE == PARAM_SFBB || PARAM_TYPE == PARAM_SFBC || PARAM_TYPE == PARAM_SFBD
 #define PROD_TYPE                     (PROD_SFB)
-#elif PARAM_TYPE == PARAM_SFA1 || PARAM_TYPE == PARAM_SFA2 || PARAM_TYPE == PARAM_SFA3 || PARAM_TYPE == PARAM_SFA4 || PARAM_TYPE == PARAM_SFA5 || PARAM_TYPE == PARAM_SFA6
+#elif PARAM_TYPE == PARAM_SFA1 || PARAM_TYPE == PARAM_SFA2 || PARAM_TYPE == PARAM_SFA3 || PARAM_TYPE == PARAM_SFA4 || PARAM_TYPE == PARAM_SFA5 || PARAM_TYPE == PARAM_SFA6 || PARAM_TYPE == PARAM_SFA7 || PARAM_TYPE == PARAM_SFA8 || PARAM_TYPE == PARAM_SFA9 || PARAM_TYPE == PARAM_SFAA || PARAM_TYPE == PARAM_SFAB || PARAM_TYPE == PARAM_SFAC || PARAM_TYPE == PARAM_SFAD
 #define PROD_TYPE                     (PROD_SFA)
 #else
 #error "Please select correct PARAM_TYPE"

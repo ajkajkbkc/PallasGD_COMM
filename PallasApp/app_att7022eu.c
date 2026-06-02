@@ -1269,6 +1269,62 @@ void Config_PStartup(float percent)
         ftemp = 12.8160;
 #endif
     }
+    else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA7 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB7 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE7)
+    {
+#if EMU_FREQ == 0
+        ftemp = 29.904; //0.04272 * 700
+#else
+        ftemp = 14.952;
+#endif
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA8 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB8 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE8)
+    {
+#if EMU_FREQ == 0
+        ftemp = 12.816; //0.04272 * 300
+#else
+        ftemp = 6.408;
+#endif
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA9 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB9 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE9)
+    {
+#if EMU_FREQ == 0
+        ftemp = 5.1264; //0.04272 * 120
+#else
+        ftemp = 2.5632;
+#endif
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAA || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBA || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEA)
+    {
+#if EMU_FREQ == 0
+        ftemp = 2.5632; //0.04272 * 60
+#else
+        ftemp = 1.2816;
+#endif
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAB || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBB || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEB)
+    {
+#if EMU_FREQ == 0
+        ftemp = 55.536; //0.04272 * 1300
+#else
+        ftemp = 27.768;
+#endif
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAC || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBC || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEC)
+    {
+#if EMU_FREQ == 0
+        ftemp = 64.08; //0.04272 * 1500
+#else
+        ftemp = 32.04;
+#endif
+    }
+    else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAD || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBD || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFED)
+    {
+#if EMU_FREQ == 0
+        ftemp = 34.176; //0.04272 * 800
+#else
+        ftemp = 17.088;
+#endif
+    }
     else
     {
 #if EMU_FREQ == 0
@@ -3305,6 +3361,205 @@ void meter_cali_param_init(void)
         gFlashParam.st.meter_cali[offset_IgainC] = 0x090E;
 
         gFlashParam.st.meter_cali[offset_Pstartup] = REG_Pstartup_Ib600A;
+    }
+    else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA7 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB7 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE7)
+    {
+		gFlashParam.st.meter_cali[offset_HFConst] = HFconst_EC50_Ib700A;
+
+		gFlashParam.st.meter_cali[offset_PgainA] = 0x1069;
+        gFlashParam.st.meter_cali[offset_PgainB] = 0x108E;
+        gFlashParam.st.meter_cali[offset_PgainC] = 0x111E;
+        gFlashParam.st.meter_cali[offset_QgainA] = 0x1069;
+        gFlashParam.st.meter_cali[offset_QgainB] = 0x108E;
+        gFlashParam.st.meter_cali[offset_QgainC] = 0x111E;
+
+        gFlashParam.st.meter_cali[offset_PhSregApq0] = 0x0206;
+        gFlashParam.st.meter_cali[offset_PhSregBpq0] = 0x018E;
+        gFlashParam.st.meter_cali[offset_PhSregCpq0] = 0x0118;
+        gFlashParam.st.meter_cali[offset_PhSregApq1] = 0x0206;
+        gFlashParam.st.meter_cali[offset_PhSregBpq1] = 0x018E;
+        gFlashParam.st.meter_cali[offset_PhSregCpq1] = 0x0118;
+
+		gFlashParam.st.meter_cali[offset_UgainA] = 0xDF6C;
+        gFlashParam.st.meter_cali[offset_UgainB] = 0xDF60;
+		gFlashParam.st.meter_cali[offset_UgainC] = 0xDF89;
+
+		gFlashParam.st.meter_cali[offset_IgainA] = 0x08DE;
+		gFlashParam.st.meter_cali[offset_IgainB] = 0x09DE;
+		gFlashParam.st.meter_cali[offset_IgainC] = 0x09B7;
+
+        gFlashParam.st.meter_cali[offset_Pstartup] = REG_Pstartup_Ib700A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA8 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB8 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE8)
+    {
+		gFlashParam.st.meter_cali[offset_HFConst] = HFconst_EC120_Ib300A;
+
+		gFlashParam.st.meter_cali[offset_PgainA] = 0x100A;
+        gFlashParam.st.meter_cali[offset_PgainB] = 0x1101;
+        gFlashParam.st.meter_cali[offset_PgainC] = 0x114D;
+        gFlashParam.st.meter_cali[offset_QgainA] = 0x100A;
+        gFlashParam.st.meter_cali[offset_QgainB] = 0x1101;
+        gFlashParam.st.meter_cali[offset_QgainC] = 0x114D;
+
+        gFlashParam.st.meter_cali[offset_PhSregApq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregBpq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregCpq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregApq1] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregBpq1] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregCpq1] = 0x01FE;
+
+		gFlashParam.st.meter_cali[offset_UgainA] = 0xDF6F;
+        gFlashParam.st.meter_cali[offset_UgainB] = 0xDF55;
+		gFlashParam.st.meter_cali[offset_UgainC] = 0xDF87;
+
+		gFlashParam.st.meter_cali[offset_IgainA] = 0x085A;
+		gFlashParam.st.meter_cali[offset_IgainB] = 0x0985;
+		gFlashParam.st.meter_cali[offset_IgainC] = 0x0956;
+
+        gFlashParam.st.meter_cali[offset_Pstartup] = REG_Pstartup_Ib300A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFA9 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFB9 || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFE9)
+    {
+		gFlashParam.st.meter_cali[offset_HFConst] = HFconst_EC300_Ib120A;
+
+		gFlashParam.st.meter_cali[offset_PgainA] = 0x100A;
+        gFlashParam.st.meter_cali[offset_PgainB] = 0x0FAC;
+        gFlashParam.st.meter_cali[offset_PgainC] = 0x100A;
+        gFlashParam.st.meter_cali[offset_QgainA] = 0x100A;
+        gFlashParam.st.meter_cali[offset_QgainB] = 0x0FAC;
+        gFlashParam.st.meter_cali[offset_QgainC] = 0x100A;
+
+		gFlashParam.st.meter_cali[offset_PhSregApq0] = 0x0086;
+        gFlashParam.st.meter_cali[offset_PhSregBpq0] = 0x00B2;
+        gFlashParam.st.meter_cali[offset_PhSregCpq0] = 0x0014;
+        gFlashParam.st.meter_cali[offset_PhSregApq1] = 0x0086;
+        gFlashParam.st.meter_cali[offset_PhSregBpq1] = 0x00B2;
+        gFlashParam.st.meter_cali[offset_PhSregCpq1] = 0x0014;
+
+		gFlashParam.st.meter_cali[offset_UgainA] = 0xDF6D;
+        gFlashParam.st.meter_cali[offset_UgainB] = 0xDF5E;
+		gFlashParam.st.meter_cali[offset_UgainC] = 0xDF8F;
+
+		gFlashParam.st.meter_cali[offset_IgainA] = 0x082E;
+		gFlashParam.st.meter_cali[offset_IgainB] = 0x0821;
+		gFlashParam.st.meter_cali[offset_IgainC] = 0x080B;
+
+        gFlashParam.st.meter_cali[offset_Pstartup] = REG_Pstartup_Ib120A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAA || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBA || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEA)
+    {		
+		gFlashParam.st.meter_cali[offset_HFConst] = HFconst_EC600_Ib60A;
+
+		gFlashParam.st.meter_cali[offset_PgainA] = 0x0FC8;
+        gFlashParam.st.meter_cali[offset_PgainB] = 0x101D;
+        gFlashParam.st.meter_cali[offset_PgainC] = 0x0FEF;
+        gFlashParam.st.meter_cali[offset_QgainA] = 0x0FC8;
+        gFlashParam.st.meter_cali[offset_QgainB] = 0x101D;
+        gFlashParam.st.meter_cali[offset_QgainC] = 0x0FEF;
+
+        gFlashParam.st.meter_cali[offset_PhSregApq0] = 0x0086;
+        gFlashParam.st.meter_cali[offset_PhSregBpq0] = 0x00B2;
+        gFlashParam.st.meter_cali[offset_PhSregCpq0] = 0x0014;
+        gFlashParam.st.meter_cali[offset_PhSregApq1] = 0x0086;
+        gFlashParam.st.meter_cali[offset_PhSregBpq1] = 0x00B2;
+        gFlashParam.st.meter_cali[offset_PhSregCpq1] = 0x0014;
+
+		gFlashParam.st.meter_cali[offset_UgainA] = 0xDF69;
+        gFlashParam.st.meter_cali[offset_UgainB] = 0xDF60;
+		gFlashParam.st.meter_cali[offset_UgainC] = 0xDF8A;
+
+	    gFlashParam.st.meter_cali[offset_IgainA] = 0x083E;
+		gFlashParam.st.meter_cali[offset_IgainB] = 0x0864;
+		gFlashParam.st.meter_cali[offset_IgainC] = 0x082B;
+
+        gFlashParam.st.meter_cali[offset_Pstartup] = REG_Pstartup_Ib60A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAB || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBB || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEB)
+    {
+
+		gFlashParam.st.meter_cali[offset_HFConst] = HFconst_EC30_Ib1300A;
+
+		gFlashParam.st.meter_cali[offset_PgainA] = 0x100A;
+        gFlashParam.st.meter_cali[offset_PgainB] = 0x10E7;
+        gFlashParam.st.meter_cali[offset_PgainC] = 0x110A;
+        gFlashParam.st.meter_cali[offset_QgainA] = 0x100A;
+        gFlashParam.st.meter_cali[offset_QgainB] = 0x10E7;
+        gFlashParam.st.meter_cali[offset_QgainC] = 0x110A;
+
+        gFlashParam.st.meter_cali[offset_PhSregApq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregBpq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregCpq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregApq1] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregBpq1] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregCpq1] = 0x01FE;
+
+		gFlashParam.st.meter_cali[offset_UgainA] = 0xDF6D;
+        gFlashParam.st.meter_cali[offset_UgainB] = 0xDF5E;
+		gFlashParam.st.meter_cali[offset_UgainC] = 0xDF88;
+
+		gFlashParam.st.meter_cali[offset_IgainA] = 0x0892;
+		gFlashParam.st.meter_cali[offset_IgainB] = 0x0963;
+		gFlashParam.st.meter_cali[offset_IgainC] = 0x09DC;
+
+        gFlashParam.st.meter_cali[offset_Pstartup] = REG_Pstartup_Ib1300A;
+    }
+	else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAC || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBC || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFEC)
+    {
+
+		gFlashParam.st.meter_cali[offset_HFConst] = HFconst_EC20_Ib1500A;
+
+		gFlashParam.st.meter_cali[offset_PgainA] = 0x1098;
+        gFlashParam.st.meter_cali[offset_PgainB] = 0x0F4E;
+        gFlashParam.st.meter_cali[offset_PgainC] = 0x0F99;
+        gFlashParam.st.meter_cali[offset_QgainA] = 0x1098;
+        gFlashParam.st.meter_cali[offset_QgainB] = 0x0F4E;
+        gFlashParam.st.meter_cali[offset_QgainC] = 0x0F99;
+
+        gFlashParam.st.meter_cali[offset_PhSregApq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregBpq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregCpq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregApq1] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregBpq1] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregCpq1] = 0x01FE;
+
+		gFlashParam.st.meter_cali[offset_UgainA] = 0xDF64;
+        gFlashParam.st.meter_cali[offset_UgainB] = 0xDF4B;
+		gFlashParam.st.meter_cali[offset_UgainC] = 0xDF85;
+
+		gFlashParam.st.meter_cali[offset_IgainA] = 0x08E5;
+		gFlashParam.st.meter_cali[offset_IgainB] = 0x07BC;
+		gFlashParam.st.meter_cali[offset_IgainC] = 0x07BC;
+
+        gFlashParam.st.meter_cali[offset_Pstartup] = REG_Pstartup_Ib1500A;
+    }
+    else if((gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFAD || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFBD || (gFlashParam.st.Prod_Param & PARAM_XX) == PARAM_SFED)
+    {
+
+		gFlashParam.st.meter_cali[offset_HFConst] = HFconst_EC20_Ib800A;
+
+		gFlashParam.st.meter_cali[offset_PgainA] = 0x0FC0;
+        gFlashParam.st.meter_cali[offset_PgainB] = 0x1014;
+        gFlashParam.st.meter_cali[offset_PgainC] = 0x1101;
+        gFlashParam.st.meter_cali[offset_QgainA] = 0x0FC0;
+        gFlashParam.st.meter_cali[offset_QgainB] = 0x1014;
+        gFlashParam.st.meter_cali[offset_QgainC] = 0x1101;
+
+        gFlashParam.st.meter_cali[offset_PhSregApq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregBpq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregCpq0] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregApq1] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregBpq1] = 0x01FE;
+        gFlashParam.st.meter_cali[offset_PhSregCpq1] = 0x01FE;
+
+		gFlashParam.st.meter_cali[offset_UgainA] = 0xDEE2;
+        gFlashParam.st.meter_cali[offset_UgainB] = 0xDED0;
+		gFlashParam.st.meter_cali[offset_UgainC] = 0xDF22;
+
+		gFlashParam.st.meter_cali[offset_IgainA] = 0x08D1;
+		gFlashParam.st.meter_cali[offset_IgainB] = 0x092B;
+		gFlashParam.st.meter_cali[offset_IgainC] = 0x09ED;
+
+        gFlashParam.st.meter_cali[offset_Pstartup] = REG_Pstartup_Ib800A;
     }
     else
     {
