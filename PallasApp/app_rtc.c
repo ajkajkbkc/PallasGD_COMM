@@ -48,7 +48,7 @@ static uint32_t ConvertDatetimeToSeconds(const rtc_datetime_t *datetime)
 
 void ConvertSecondsToDatetime(uint32_t seconds, rtc_datetime_t *datetime, uint8_t flag)
 {
-    LOGW("naiad_rtc", "Enter %s(), seconds = %u", __func__, seconds);
+    //LOGW("naiad_rtc", "Enter %s(), seconds = %u", __func__, seconds);
     uint32_t x;
     uint32_t secondsRemaining, days;
     uint16_t daysInYear;
